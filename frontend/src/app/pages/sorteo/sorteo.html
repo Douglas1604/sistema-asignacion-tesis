@@ -1,0 +1,200 @@
+<div class="dashboard-container">
+  <aside class="sidebar">
+    <div class="sidebar-header"><h2>UMG Admin</h2></div>
+    <nav>
+      <ul>
+        <li><a href="/dashboard"><i class="fas fa-home" style="margin-right: 10px;"></i> Inicio</a></li>
+        <li class="divider"></li>
+        <li><a href="/sorteo" class="active"><i class="fas fa-dice" style="margin-right: 10px;"></i> Realizar Sorteo</a></li>
+        <li><a href="/reportes"><i class="fas fa-file-excel" style="margin-right: 10px;"></i> Exportar Excel</a></li>
+        <li class="logout"><a href="#" (click)="cerrarSesion($event)"><i class="fas fa-sign-out-alt" style="margin-right: 10px;"></i> Salir</a></li>
+      </ul>
+    </nav>
+  </aside>
+
+  <main class="content">
+    <header class="umg-header">
+      <div>
+        <h1>Asignación y Sorteo Oficial</h1>
+        <p class="subtitle">Motor matemático para la distribución de ternas</p>
+      </div>
+    </header>
+    
+    <div class="config-panel" *ngIf="!configuracionLista">
+      <h2 style="color: #003366; margin-bottom: 10px;"><i class="fas fa-cog" style="color: #003366;"></i> Configuración Inicial</h2>
+      <p style="color: #555; margin-bottom: 25px;">Selecciona la modalidad de evaluación.</p>
+
+      <div class="form-group" style="margin-bottom: 30px;">
+        <label style="font-weight: 700; margin-bottom: 8px; display: block; color: #333;"><i class="fas fa-list-alt" style="color: #003366;"></i> Modalidad:</label>
+        <select [(ngModel)]="eventoSeleccionado" class="form-select">
+          <option [ngValue]="null">-- Seleccione --</option>
+          <option *ngFor="let e of tiposEvento" [ngValue]="e">{{ e.nombre }} - {{ e.descripcion }}</option>
+        </select>
+      </div>
+
+      <button class="btn-umg-play" style="width: 100%; padding: 15px;" (click)="confirmarConfiguracion()">
+        Continuar <i class="fas fa-arrow-right" style="margin-left: 10px;"></i>
+      </button>
+    </div>
+
+    <div *ngIf="configuracionLista">
+      <div style="background: white; padding: 20px; border-radius: 8px; margin-bottom: 20px; border-top: 4px solid #CC0000;">
+        <h3 style="margin-top: 0; color: #003366;"><i class="fas fa-file-upload" style="color: #003366;"></i> Cargar Listados</h3>
+        
+        <div style="display: flex; gap: 20px;">
+          <div style="flex: 1;">
+            <label style="font-weight: bold;"><i class="fas fa-chalkboard-teacher" style="color:#003366;"></i> Listado de Catedráticos</label>
+            <input type="file" (change)="leerExcel($event, 'profesores')" accept=".xlsx, .xls" class="form-control" style="margin-bottom: 10px;">
+            <button class="btn-umg-play" style="background-color: #003366; font-size: 0.8rem; padding: 5px 10px; width: 100%;" (click)="generarPlantilla('profesores')">
+              <i class="fas fa-magic"></i> Generar Plantilla
+            </button>
+          </div>
+          <div style="flex: 1;">
+            <label style="font-weight: bold;"><i class="fas fa-user-graduate" style="color:#003366;"></i> Listado de Alumnos</label>
+            <input type="file" (change)="leerExcel($event, 'alumnos')" accept=".xlsx, .xls" class="form-control" style="margin-bottom: 10px;">
+            <button class="btn-umg-play" style="background-color: #003366; font-size: 0.8rem; padding: 5px 10px; width: 100%;" (click)="generarPlantilla('alumnos')">
+              <i class="fas fa-magic"></i> Generar Plantilla
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ZONA DE PRIVADOS Y SEMINARIOS -->
+      <ng-container *ngIf="eventoSeleccionado?.id !== 3">
+        <div *ngIf="eventoSeleccionado?.id === 1 && profesoresNormal.length > 0" style="background: white; padding: 20px; border-radius: 8px; margin-bottom: 20px; border-top: 4px solid #f59e0b; text-align: center;">
+          <h3 style="margin-top: 0; color: #003366;"><i class="fas fa-tag" style="color: #003366;"></i> Asignar Área al Sorteo</h3>
+          <p style="color: #666; font-size: 0.9rem;">Selecciona el área para la que se sorteará la próxima terna.</p>
+          <p *ngIf="catedraticoGanadorNormal" style="color: #CC0000; font-size: 0.85rem; font-weight: bold;">(Bloqueado durante el sorteo en curso)</p>
+          
+          <div style="display: flex; gap: 15px; justify-content: center; margin-top: 15px;">
+            <button *ngFor="let area of areasDisponibles" 
+                    class="btn-umg-play" 
+                    [style.background-color]="areaSeleccionada === area ? '#CC0000' : '#64748b'" 
+                    [disabled]="catedraticoGanadorNormal !== null"
+                    [style.opacity]="(catedraticoGanadorNormal !== null && areaSeleccionada !== area) ? '0.4' : '1'"
+                    [style.cursor]="catedraticoGanadorNormal !== null ? 'not-allowed' : 'pointer'"
+                    (click)="seleccionarArea(area)">
+              {{ area }}
+            </button>
+          </div>
+        </div>
+
+        <div class="stats-grid">
+          <div class="stat-card"><h3><i class="fas fa-user-graduate" style="color:#003366;"></i> Alumnos Restantes</h3><p class="stat-number">{{ alumnosNormal.length }}</p></div>
+          <div class="stat-card"><h3><i class="fas fa-chalkboard-teacher" style="color:#003366;"></i> Profesores Restantes</h3><p class="stat-number">{{ profesoresNormal.length }}</p></div>
+          <div class="stat-card highlight"><h3><i class="fas fa-bullseye" style="color:#CC0000;"></i> Cupo Matemático</h3><p class="stat-number">{{ cupoBaseNormal }}</p></div>
+        </div>
+
+        <div class="sorteo-area">
+          <div class="ruleta-wrapper">
+            <div class="aguja"></div>
+            <div class="ruleta-circulo" [style.background]="obtenerFondoRuleta(profesoresNormal)" [style.transform]="'rotate(' + gradosRotacionNormalProfe + 'deg)'">
+              <div class="porcion-texto" *ngFor="let prof of profesoresNormal; let i = index" [style.transform]="obtenerTransformTexto(i, profesoresNormal.length)" style="font-size: 1.1rem; font-weight: bold;"> 
+                {{ obtenerNombreCorto(prof.nombre_completo) }} 
+              </div>
+            </div>
+          </div>
+          <div class="controles-sorteo">
+            <h2>Sorteo de Catedráticos</h2>
+            <button class="btn-umg-play" (click)="iniciarSorteoCatedraticosNormal()" [disabled]="girandoNormalProfe || profesoresNormal.length === 0 || alumnosNormal.length === 0 || (eventoSeleccionado?.id === 1 && areaSeleccionada === '')">
+              <i class="fas fa-sync-alt" [class.fa-spin]="girandoNormalProfe"></i> {{ girandoNormalProfe ? 'Girando...' : 'INICIAR SORTEO' }}
+            </button>
+            <p *ngIf="eventoSeleccionado?.id === 1 && areaSeleccionada === '' && profesoresNormal.length > 0" style="color: #CC0000; font-weight: bold; margin-top: 10px; font-size: 0.85rem;">
+              ⚠️ Área requerida.
+            </p>
+
+            <div class="resultado-box" *ngIf="catedraticoGanadorNormal">
+              <h3><i class="fas fa-trophy" style="color:#f59e0b;"></i> Seleccionado:</h3>
+              <p class="ganador-nombre" *ngIf="eventoSeleccionado?.id === 1">Grupo {{ catedraticoGanadorNormal.id }} de {{ areaSeleccionada }}</p>
+              <p class="ganador-nombre" *ngIf="eventoSeleccionado?.id !== 1">Terna #{{ catedraticoGanadorNormal.id }}</p>
+              <p style="color: #666; font-size: 1.1rem; font-weight: bold; margin-top: 5px;">{{ catedraticoGanadorNormal.nombre_completo }}</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="sorteo-area" *ngIf="catedraticoGanadorNormal" style="margin-top: 30px; border-top-color: #CC0000;">
+          <div class="controles-sorteo">
+            <h2>Sorteo de Alumnos</h2>
+            <button class="btn-umg-play" style="background-color: #CC0000;" (click)="iniciarSorteoAlumnosNormal()" [disabled]="girandoNormalAlum || alumnosAsignadosNormal.length >= cupoActualNormal || alumnosNormal.length === 0">
+              <i class="fas fa-sync-alt" [class.fa-spin]="girandoNormalAlum"></i> {{ girandoNormalAlum ? 'Sorteando...' : 'SORTEAR ALUMNO' }}
+            </button>
+            <div class="resultado-box" *ngIf="alumnosAsignadosNormal.length > 0">
+              <ul style="list-style-type: none; padding: 0;">
+                <li *ngFor="let alu of alumnosAsignadosNormal"><i class="fas fa-check-circle" style="color:#10b981;"></i> {{ obtenerNombreAlumnoLista(alu) }}</li>
+              </ul>
+            </div>
+            <button *ngIf="alumnosAsignadosNormal.length >= cupoActualNormal" class="btn-umg-play" style="background-color: #003366; width: 100%; margin-top: 15px;" (click)="guardarTernaNormal()"><i class="fas fa-save"></i> GUARDAR TERNA</button>
+          </div>
+          <div class="ruleta-wrapper">
+            <div class="aguja"></div>
+            <div class="ruleta-circulo" [style.background]="obtenerFondoRuleta(alumnosNormal)" [style.transform]="'rotate(' + gradosRotacionNormalAlum + 'deg)'">
+              <div class="porcion-texto" *ngFor="let alu of alumnosNormal; let i = index" [style.transform]="obtenerTransformTexto(i, alumnosNormal.length)" style="font-size: 0.9rem;">
+                {{ obtenerNombreAlumnoCorto(alu) }}
+              </div>
+            </div>
+          </div>
+        </div>
+      </ng-container>
+
+      <!-- ZONA DE TESIS -->
+      <ng-container *ngIf="eventoSeleccionado?.id === 3">
+        <div class="stats-grid">
+          <div class="stat-card"><h3><i class="fas fa-user-graduate" style="color:#003366;"></i> Alumnos Restantes</h3><p class="stat-number">{{ alumnosTesis.length }}</p></div>
+          <div class="stat-card"><h3><i class="fas fa-chalkboard-teacher" style="color:#003366;"></i> Ternas Totales a Armar</h3><p class="stat-number">{{ cantidadTernasTesis }}</p></div>
+          <div class="stat-card highlight"><h3><i class="fas fa-bullseye" style="color:#CC0000;"></i> Alumnos base por Terna</h3><p class="stat-number">{{ cupoBaseTesis }}</p></div>
+        </div>
+
+        <div class="sorteo-area">
+          <div class="ruleta-wrapper">
+            <div class="aguja"></div>
+            <div class="ruleta-circulo" [style.background]="obtenerFondoRuleta(profesoresTesis)" [style.transform]="'rotate(' + gradosRotacionTesisProfe + 'deg)'">
+              <div class="porcion-texto" *ngFor="let prof of profesoresTesis; let i = index" [style.transform]="obtenerTransformTexto(i, profesoresTesis.length)" style="font-size: 1.1rem; font-weight: bold;">
+                {{ obtenerNombreCorto(prof.nombre_completo) }}
+              </div>
+            </div>
+          </div>
+          <div class="controles-sorteo">
+            <h2>Conformación de Jurado (Terna)</h2>
+            <button class="btn-umg-play" (click)="iniciarSorteoTesisCatedratico()" [disabled]="girandoTesisProfe || catedraticosTesisAsignados.length >= 3 || profesoresTesis.length === 0 || alumnosTesis.length === 0">
+              <i class="fas fa-sync-alt" [class.fa-spin]="girandoTesisProfe"></i> {{ girandoTesisProfe ? 'Girando...' : 'SORTEAR JURADO (' + catedraticosTesisAsignados.length + '/3)' }}
+            </button>
+            <div class="resultado-box" *ngIf="catedraticosTesisAsignados.length > 0">
+              <ul style="list-style-type: none; padding: 0;">
+                <li *ngFor="let prof of catedraticosTesisAsignados; let idx = index"><i class="fas fa-check-circle" style="color:#10b981;"></i> <strong>{{ idx === 0 ? 'Presidente' : idx === 1 ? 'Vocal 1' : 'Vocal 2' }}:</strong> {{ obtenerNombreCorto(prof.nombre_completo) }}</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+
+        <div class="sorteo-area" *ngIf="catedraticosTesisAsignados.length === 3" style="margin-top: 30px; border-top-color: #CC0000;">
+          <div class="controles-sorteo">
+            <h2>Asignación de Alumnos a esta Terna</h2>
+            
+            <button class="btn-umg-play" style="background-color: #CC0000;" (click)="iniciarSorteoTesisAlumnoIndividual()" [disabled]="girandoTesisAlum || alumnosTesisAsignados.length >= cupoActualTesis || alumnosTesis.length === 0">
+              <i class="fas fa-sync-alt" [class.fa-spin]="girandoTesisAlum"></i> 
+              {{ girandoTesisAlum ? 'Sorteando...' : 'SORTEAR ALUMNO (' + alumnosTesisAsignados.length + '/' + cupoActualTesis + ')' }}
+            </button>
+            
+            <div class="resultado-box" *ngIf="alumnosTesisAsignados.length > 0">
+              <h3><i class="fas fa-users" style="color: #003366;"></i> Grupo Asignado:</h3>
+              <ul style="list-style-type: none; padding: 0; max-height: 200px; overflow-y: auto;">
+                <li *ngFor="let alu of alumnosTesisAsignados"><i class="fas fa-check-circle" style="color:#10b981;"></i> {{ obtenerNombreAlumnoLista(alu) }}</li>
+              </ul>
+            </div>
+            
+            <button *ngIf="alumnosTesisAsignados.length >= cupoActualTesis" class="btn-umg-play" style="background-color: #003366; width: 100%; margin-top: 15px;" (click)="guardarTesisOficial()"><i class="fas fa-save"></i> GUARDAR TERNA COMPLETA</button>
+          </div>
+          <div class="ruleta-wrapper">
+            <div class="aguja"></div>
+            <div class="ruleta-circulo" [style.background]="obtenerFondoRuleta(alumnosTesis)" [style.transform]="'rotate(' + gradosRotacionTesisAlum + 'deg)'">
+              <div class="porcion-texto" *ngFor="let alu of alumnosTesis; let i = index" [style.transform]="obtenerTransformTexto(i, alumnosTesis.length)" style="font-size: 0.9rem;">
+                {{ obtenerNombreAlumnoCorto(alu) }}
+              </div>
+            </div>
+          </div>
+        </div>
+      </ng-container>
+
+    </div>
+  </main>
+</div>

@@ -1,0 +1,125 @@
+/* Fondo con un degradado azul institucional */
+.login-container {
+  /* --- CAMBIOS AQUÍ PARA QUITAR MARGEN BLANCO --- */
+  position: fixed; /* Fuerza al contenedor a pegarse a la pantalla */
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  /* ----------------------------------------------- */
+  
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background: linear-gradient(135deg, #003366 0%, #0055a5 100%);
+  font-family: 'Segoe UI', Roboto, sans-serif;
+}
+
+/* Tarjeta de login más elegante */
+.login-card {
+  background: #fff;
+  padding: 2.5rem;
+  border-radius: 12px;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+  width: 100%;
+  max-width: 450px;
+  text-align: center;
+  border-top: 5px solid #CC0000; /* Detalle rojo en la parte superior */
+}
+
+/* Estilos para el logo */
+.logo-container {
+  margin-bottom: 1.5rem;
+}
+
+.login-logo {
+  width: 120px; /* Ajusta el tamaño según prefieras */
+  height: auto;
+}
+
+/* Títulos */
+h2 {
+  color: #003366;
+  margin-bottom: 0.5rem;
+  font-weight: 700;
+}
+
+h3 {
+  color: #555;
+  margin-bottom: 1rem;
+  font-weight: 600;
+  font-size: 1.2rem;
+}
+
+p {
+  color: #777;
+  margin-bottom: 2rem;
+}
+
+/* Estilos del formulario (similares a los anteriores, pero refinados) */
+.form-group {
+  margin-bottom: 1.5rem;
+  text-align: left;
+}
+
+.form-group label {
+  display: block;
+  margin-bottom: 0.5rem;
+  color: #003366;
+  font-weight: 600;
+}
+
+/* Inputs con un toque moderno */
+.form-group input {
+  width: 100%;
+  padding: 12px;
+  border: 2px solid #e0e0e0;
+  border-radius: 6px;
+  box-sizing: border-box; /* Importante para que el padding no afecte el ancho */
+  transition: border-color 0.3s;
+  font-size: 1rem;
+}
+
+.form-group input:focus {
+  outline: none;
+  border-color: #003366;
+}
+
+/* Botón UMG */
+.btn-umg {
+  width: 100%;
+  padding: 12px;
+  background-color: #CC0000; /* Rojo UMG */
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 1.1rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background-color 0.3s;
+}
+
+.btn-umg:hover {
+  background-color: #a30000; /* Rojo más oscuro al pasar el mouse */
+}
+
+/* Mensaje de error */
+.error-message {
+  color: #CC0000;
+  background-color: #ffe6e6;
+  padding: 10px;
+  border-radius: 6px;
+  margin-bottom: 1.5rem;
+  font-size: 0.9rem;
+  border: 1px solid #ffcccc;
+}
+
+/* Pie de página del login */
+.login-footer {
+  margin-top: 2rem;
+  font-size: 0.85rem;
+  color: #888;
+  border-top: 1px solid #eee;
+  padding-top: 1rem;
+}

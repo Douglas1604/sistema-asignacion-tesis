@@ -1,0 +1,49 @@
+<div class="dashboard-container">
+  <aside class="sidebar">
+    <div class="sidebar-header"><h2>UMG Admin</h2></div>
+    <nav>
+      <ul>
+        <li><a href="/dashboard" class="active"><i class="fas fa-home" style="margin-right: 10px;"></i> Inicio</a></li>
+        <li class="divider"></li>
+        <li><a href="/sorteo"><i class="fas fa-dice" style="margin-right: 10px;"></i> Realizar Sorteo</a></li>
+        <li><a href="/reportes"><i class="fas fa-file-excel" style="margin-right: 10px;"></i> Exportar Excel</a></li>
+        <li class="logout"><a href="#" (click)="cerrarSesion($event)"><i class="fas fa-sign-out-alt" style="margin-right: 10px;"></i> Salir</a></li>
+      </ul>
+    </nav>
+  </aside>
+
+  <main class="content">
+    <header class="umg-header">
+      <div>
+        <h1>Panel de Control Principal</h1>
+        <p class="subtitle">Resumen de sorteos agrupados por Alumno</p>
+      </div>
+      </header>
+
+    <div class="stats-grid">
+      <div class="stat-card"><h3><i class="fas fa-clipboard-check" style="color:#003366;"></i> Total de Asignaciones</h3><p class="stat-number">{{ totalSorteos }}</p></div>
+      <div class="stat-card"><h3><i class="fas fa-book" style="color:#003366;"></i> Ternas de Tesis</h3><p class="stat-number">{{ totalTesis }}</p></div>
+      <div class="stat-card"><h3><i class="fas fa-users" style="color:#003366;"></i> Privados / Seminarios</h3><p class="stat-number">{{ totalPrivados }}</p></div>
+    </div>
+
+    <div style="background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); border-top: 4px solid #003366;">
+      <h2 style="color: #003366; margin-top: 0;"><i class="fas fa-history"></i> Historial de Sorteos</h2>
+      <table class="umg-table" *ngIf="ultimosSorteos.length > 0">
+        <thead>
+          <tr><th>Modalidad</th><th>Alumno</th><th>Catedráticos Asignados</th><th>Fecha</th><th style="text-align: center;">Acciones</th></tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let asig of ultimosSorteos">
+            <td><span class="badge">{{ asig.modalidad }}</span></td>
+            <td><strong>{{ asig.alumno_nombre }}</strong> <br><small>{{ asig.alumno_carnet }}</small></td>
+            <td style="font-weight: 500; color: #003366; font-size: 0.95rem;">{{ asig.profesores || asig.profesor_nombre }}</td>
+            <td>{{ asig.fecha_formateada }}</td> 
+            <td style="text-align: center;">
+              <button (click)="eliminarSorteo(asig.alumno_carnet, asig.fecha_formateada)" style="border: none; background: none; color: #CC0000; cursor: pointer; font-size: 1.2rem;"><i class="fas fa-trash"></i></button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </main>
+</div>
