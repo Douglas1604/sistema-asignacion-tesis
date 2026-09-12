@@ -39,6 +39,8 @@ const router = express.Router();
  *             schema:
  *               $ref: '#/components/schemas/ErrorResponse'
  */
+// Se monta ANTES que `apiLimiter` en app.js: un orquestador o balanceador que
+// consulta la salud con frecuencia no debe agotar el cupo ni ser bloqueado.
 router.get("/health", async (req, res) => {
   try {
     await verificarConexion();

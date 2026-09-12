@@ -20,6 +20,18 @@ const { verificarConexion, cerrarPool } = require("./src/config/db");
 /** Margen para que las peticiones en curso terminen antes de cerrar. */
 const TIEMPO_ESPERA_APAGADO_MS = 10000;
 
+/**
+ * Secuencia de arranque del proceso HTTP.
+ *
+ * @description Aplica el principio de "fallo temprano" (fail-fast): primero se
+ * confirma la disponibilidad de MariaDB y solo después se abre el puerto. Una vez
+ * en escucha, registra los manejadores de señales del sistema operativo para
+ * garantizar un apagado ordenado (graceful shutdown): se dejan de aceptar
+ * conexiones nuevas, se drenan las peticiones en curso y se libera el pool.
+ *
+ * @returns {Promise<void>} Se resuelve cuando el servidor queda escuchando.
+ * Ante un fallo de conexión con la base de datos termina el proceso con código 1.
+ */
 async function iniciar() {
   // Arrancar sin base de datos solo serviría para devolver errores 500 a todo
   // el mundo; es preferible fallar ruidosamente aquí.
@@ -63,6 +75,9 @@ async function iniciar() {
     }, TIEMPO_ESPERA_APAGADO_MS);
     temporizador.unref();
 
+    // `server.close` deja de aceptar conexiones y ejecuta el callback cuando la
+    // última petición activa termina; hasta entonces el pool debe seguir abierto,
+    // porque esas peticiones todavía pueden estar consultando la base de datos.
     server.close(async () => {
       try {
         await cerrarPool();

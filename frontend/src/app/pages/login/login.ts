@@ -51,6 +51,13 @@ export class LoginComponent {
    * @description Se ejecuta al hacer clic en el botón de "Ingresar".
    * Valida el formato del correo, empaqueta las credenciales y consume el
    * endpoint de login del servidor.
+   *
+   * Recorrido completo: onLogin -> AuthService.login (HttpClient POST) ->
+   * authInterceptor (sin token aún, la petición sale tal cual) -> API
+   * /auth/login -> respuesta con JWT -> `tap` persiste la sesión -> navegación
+   * al destino solicitado o al dashboard.
+   *
+   * @returns void. El resultado se refleja en `errorMessage` o en la navegación.
    */
   onLogin() {
     this.errorMessage = '';
@@ -89,6 +96,7 @@ export class LoginComponent {
           this.password = '';
 
           // Volvemos a donde el usuario quería ir, si la guarda lo desvió.
+          // `navigateByUrl` interpreta el valor como ruta interna de la SPA.
           const destino =
             this.route.snapshot.queryParamMap.get('redirigir') ?? '/dashboard';
           this.router.navigateByUrl(destino);

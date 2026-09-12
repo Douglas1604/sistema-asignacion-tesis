@@ -12,6 +12,15 @@ import { inject } from '@angular/core';
 
 import { AuthService } from '../services/auth';
 
+/**
+ * Guarda funcional de tipo `CanActivate`.
+ *
+ * @param route Instantánea de la ruta que se intenta activar (no se utiliza).
+ * @param state Estado del router; aporta la URL de destino solicitada.
+ * @returns `true` para permitir la navegación, o un `UrlTree` hacia `/login`.
+ *          Devolver un `UrlTree` (en lugar de navegar y devolver `false`)
+ *          permite al router cancelar y redirigir en una sola operación.
+ */
 export const authGuard: CanActivateFn = (route, state) => {
   const authService = inject(AuthService);
   const router = inject(Router);

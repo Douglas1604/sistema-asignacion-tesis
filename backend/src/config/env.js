@@ -19,12 +19,26 @@ const SECRETOS_PROHIBIDOS = [
   "secret",
 ];
 
+/**
+ * Convierte una variable de entorno separada por comas en una lista depurada.
+ *
+ * @param {string|undefined} valor Cadena del tipo "http://a.com, http://b.com".
+ * @returns {string[]} Elementos recortados, sin entradas vacías.
+ */
 const csvALista = (valor) =>
   String(valor || "")
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean);
 
+/**
+ * Esquema declarativo de la configuración.
+ *
+ * @description Se procesa en tres fases encadenadas:
+ *  1. `object`      -> tipado y coerción de cada variable (todo `process.env` es string).
+ *  2. `transform`   -> derivación de valores calculados (lista CORS, banderas de entorno).
+ *  3. `superRefine` -> reglas que dependen de varias variables a la vez.
+ */
 const envSchema = z
   .object({
     NODE_ENV: z
@@ -110,6 +124,8 @@ const envSchema = z
     }
   });
 
+// `safeParse` no lanza excepción: devuelve un objeto con el resultado, lo que
+// permite reunir todos los problemas y reportarlos juntos antes de abortar.
 const resultado = envSchema.safeParse(process.env);
 
 if (!resultado.success) {
@@ -123,4 +139,6 @@ if (!resultado.success) {
   process.exit(1);
 }
 
+// Congelar el objeto impide que otro módulo altere la configuración en tiempo
+// de ejecución (por ejemplo, sustituir el secreto JWT tras el arranque).
 module.exports = Object.freeze(resultado.data);

@@ -4,7 +4,11 @@
 
 const { z } = require("zod");
 
-/** Longitud máxima aceptada para una contraseña. Frena hashes desmedidos. */
+/**
+ * Longitud máxima aceptada para una contraseña. Frena hashes desmedidos.
+ * Nota: bcrypt solo considera los primeros 72 bytes de la entrada; el tope
+ * evita además que se envíen cadenas enormes para consumir CPU del servidor.
+ */
 const MAX_PASSWORD = 128;
 
 /**

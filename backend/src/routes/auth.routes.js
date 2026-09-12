@@ -45,6 +45,8 @@ const router = express.Router();
  *       413:
  *         $ref: '#/components/responses/CuerpoDemasiadoGrande'
  */
+// El limitador precede a la validación: incluso un intento con cuerpo inválido
+// consume cupo, lo que impide sondear el endpoint sin coste para el atacante.
 router.post(
   "/login",
   loginLimiter,

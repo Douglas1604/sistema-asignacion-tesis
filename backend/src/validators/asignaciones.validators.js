@@ -73,7 +73,14 @@ const asignacionTernaSchema = z
   })
   .strict();
 
-/** Cuerpo aceptado por POST /asignaciones. */
+/**
+ * Cuerpo aceptado por POST /asignaciones.
+ *
+ * @description Con una unión discriminada, Zod lee primero `es_tesis` y
+ * selecciona el esquema correspondiente, en vez de probar ambos. Los mensajes
+ * de error resultan precisos y un cuerpo que mezcle campos de tesis y de terna
+ * es rechazado por el `.strict()` del esquema elegido.
+ */
 const crearAsignacionSchema = z.discriminatedUnion("es_tesis", [
   asignacionTesisSchema,
   asignacionTernaSchema,
@@ -84,6 +91,8 @@ const crearAsignacionSchema = z.discriminatedUnion("es_tesis", [
  * el reporte (DATE_FORMAT '%d/%m/%Y %H:%i'). Validar la forma evita que
  * llegue a la consulta cualquier cadena arbitraria.
  */
+// Los anclajes `^` y `$` obligan a que TODA la cadena cumpla el patrón, no
+// solo una parte; sin ellos, "12/09/2026 10:30' OR 1=1" sería aceptada.
 const FORMATO_FECHA_LOTE = /^\d{2}\/\d{2}\/\d{4} \d{2}:\d{2}$/;
 
 const eliminarLoteQuerySchema = z

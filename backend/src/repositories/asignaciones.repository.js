@@ -10,6 +10,11 @@
 
 const { pool } = require("../config/db");
 
+// Nota sobre inyección SQL, aplicable a todo el módulo: ningún valor recibido
+// se concatena en el texto de la sentencia. Cada `?` se sustituye por el driver
+// mysql2, que escapa el valor según su tipo antes de enviarlo; así una entrada
+// como `x' OR '1'='1` se almacena como texto literal y no altera la consulta.
+
 /** Roles del jurado de tesis, en el orden en que salen de la ruleta. */
 const ROLES_TESIS = ["Presidente", "Vocal 1", "Vocal 2"];
 
@@ -28,10 +33,16 @@ const AsignacionesRepository = {
    * @returns {Promise<number>} Número de filas insertadas.
    */
   async crearAsignacionesTesis({ alumno, profesores, tipoEventoId }) {
+    // Una transacción exige que todas las sentencias usen la MISMA conexión;
+    // por eso se reserva una conexión dedicada en lugar de usar `pool.query`,
+    // que podría repartir cada INSERT en una conexión distinta.
     const connection = await pool.getConnection();
     try {
       await connection.beginTransaction();
 
+      // El índice `i` vincula la posición de sorteo con el rol del jurado:
+      // el primer catedrático extraído es Presidente, el segundo Vocal 1 y el
+      // tercero Vocal 2.
       for (let i = 0; i < profesores.length; i++) {
         const nombreConRol = `${
           profesores[i].nombre_completo || CATEDRATICO_POR_DEFECTO
@@ -49,9 +60,12 @@ const AsignacionesRepository = {
       return profesores.length;
     } catch (error) {
       // Si una fila falla, ninguna queda escrita: el jurado es todo o nada.
+      // El error se relanza para que el manejador central decida la respuesta.
       await connection.rollback();
       throw error;
     } finally {
+      // Se ejecuta tanto en éxito como en fallo: devolver la conexión al pool
+      // evita fugas que, acumuladas, bloquearían al resto de peticiones.
       connection.release();
     }
   },
@@ -99,6 +113,10 @@ const AsignacionesRepository = {
    * @returns {Promise<object[]>}
    */
   async listarParaReporte({ limite, desplazamiento }) {
+    // LEFT JOIN (y no INNER JOIN) conserva la asignación aunque su modalidad
+    // no se encuentre en el catálogo; COALESCE le da entonces un nombre visible.
+    // El formateo de fecha se hace en SQL para que la cadena coincida
+    // exactamente con la que se usa después como identificador de lote.
     const sql = `
       SELECT
         COALESCE(te.nombre, 'Tesis') AS modalidad,
@@ -131,6 +149,10 @@ const AsignacionesRepository = {
    * @returns {Promise<number>}
    */
   async contarPorFechaLote(fecha) {
+    // Un "lote" no tiene clave propia en el modelo: se identifica por la marca
+    // de tiempo truncada al minuto. Las filas de un mismo guardado comparten,
+    // en la práctica, ese minuto; como contrapartida, dos guardados dentro del
+    // mismo minuto se consideran un único lote (limitación del modelo actual).
     const sql = `
       SELECT COUNT(*) AS total
       FROM asignaciones

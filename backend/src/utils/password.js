@@ -27,6 +27,13 @@ function esHashBcrypt(valor) {
 
 /**
  * Genera el hash de una contraseña nueva.
+ *
+ * @description bcrypt genera internamente una sal aleatoria de 128 bits y la
+ * incrusta en el resultado junto al factor de coste, con el formato
+ * `$2b$<coste>$<sal 22 car.><hash 31 car.>` (60 caracteres). El coste es
+ * logarítmico: `BCRYPT_ROUNDS = 12` implica 2^12 = 4096 iteraciones de la
+ * expansión de clave, y cada unidad adicional duplica el tiempo de cálculo.
+ *
  * @param {string} plano Contraseña en claro.
  * @returns {Promise<string>} Hash bcrypt.
  */
@@ -50,6 +57,9 @@ async function verificarPassword(plano, hashAlmacenado) {
   if (!esHashBcrypt(hashAlmacenado)) {
     return false;
   }
+  // `compare` no "descifra" nada: extrae la sal y el coste del hash almacenado,
+  // vuelve a calcular el hash de la contraseña recibida con esos mismos
+  // parámetros y compara ambos resultados.
   return bcrypt.compare(plano, hashAlmacenado);
 }
 

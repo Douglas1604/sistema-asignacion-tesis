@@ -8,6 +8,17 @@
 const mysql = require("mysql2/promise");
 const env = require("./env");
 
+/**
+ * Pool compartido de conexiones.
+ *
+ * @description En lugar de abrir una conexión TCP por petición (costoso por el
+ * handshake y la autenticación con MariaDB), se mantiene un conjunto reutilizable
+ * de hasta `DB_CONNECTION_LIMIT` conexiones. Con `waitForConnections` y
+ * `queueLimit: 0`, una petición que no encuentra conexión libre espera en cola
+ * en vez de fallar inmediatamente.
+ *
+ * @type {import("mysql2/promise").Pool}
+ */
 const pool = mysql.createPool({
   host: env.DB_HOST,
   port: env.DB_PORT,
@@ -31,6 +42,8 @@ const pool = mysql.createPool({
  */
 async function verificarConexion() {
   const connection = await pool.getConnection();
+  // El bloque `finally` asegura que la conexión vuelva al pool incluso si el
+  // ping falla; de lo contrario, cada chequeo fallido agotaría una conexión.
   try {
     await connection.ping();
   } finally {

@@ -115,6 +115,9 @@ router.get(
  *       422:
  *         $ref: '#/components/responses/ErrorValidacion'
  */
+// Cadena efectiva de POST /asignaciones:
+//   apiLimiter (app.js) -> requireAuth (router.use) -> requireRole(admin)
+//   -> validate(crearAsignacionSchema) -> AsignacionesController.crear
 router.post(
   "/",
   requireRole(ROLES.ADMIN),
@@ -159,6 +162,10 @@ router.post(
  *       422:
  *         $ref: '#/components/responses/ErrorValidacion'
  */
+// `/lote` se declara ANTES que `/alumno/:carnet/:fecha`. Express evalúa las
+// rutas en orden de registro; aunque aquí no colisionan (difieren en número de
+// segmentos), se sigue la convención de registrar las rutas literales antes
+// que las parametrizadas.
 router.delete(
   "/lote",
   requireRole(ROLES.ADMIN),

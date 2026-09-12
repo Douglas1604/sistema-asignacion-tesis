@@ -309,6 +309,9 @@ const GLOB_RUTAS = path
   .split(path.sep)
   .join("/");
 
+// La especificación se genera una sola vez al cargar el módulo, combinando la
+// definición base con los bloques `@swagger` de los archivos de rutas. Así la
+// documentación vive junto al código del endpoint y no se desincroniza.
 const spec = swaggerJsdoc({
   definition: definicion,
   apis: [GLOB_RUTAS],

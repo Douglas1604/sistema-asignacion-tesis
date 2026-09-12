@@ -5,6 +5,9 @@
  */
 
 /**
+ * Proyecta una fila de usuario al contrato público de la API.
+ * Aunque la fila de login contiene `password_hash`, al no enumerarse aquí
+ * es imposible que llegue a la respuesta.
  * @param {object} fila Fila devuelta por el repositorio.
  * @returns {{id: number, username: string, email: string, rol: string, rol_id: number, creado_en: string}}
  */
@@ -20,6 +23,7 @@ function aUsuarioDTO(fila) {
 }
 
 /**
+ * Proyecta una colección de usuarios.
  * @param {object[]} filas Filas devueltas por el repositorio.
  * @returns {object[]} Lista de DTOs.
  */

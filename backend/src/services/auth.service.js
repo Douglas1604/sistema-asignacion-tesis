@@ -14,6 +14,15 @@ const { aUsuarioDTO } = require("../dtos/usuario.dto");
 /**
  * Firma el token de acceso del usuario.
  * El payload lleva solo lo imprescindible para autorizar: nunca datos sensibles.
+ *
+ * @description Estructura del token resultante (`header.payload.firma`, en Base64URL):
+ *  - Claims registrados: `sub` (id del usuario), `iss` (emisor), y los que añade
+ *    la librería automáticamente: `iat` (emitido en) y `exp` (expira en).
+ *  - Claims privados: `email`, `rol`, `rol_id`, usados para autorizar sin ir a la BD.
+ * La firma es simétrica (HMAC-SHA256, algoritmo HS256 por defecto): el mismo
+ * `JWT_SECRET` firma y verifica. El payload está CODIFICADO, no cifrado; por eso
+ * no se incluye ningún dato que no pueda ser leído por el portador del token.
+ *
  * @param {object} usuario Fila de usuario con su rol.
  * @returns {string} JWT firmado.
  */
@@ -40,6 +49,10 @@ function firmarToken(usuario) {
  * @throws {AppError} 401 si está expirado, mal firmado o es de otro emisor.
  */
 function verificarToken(token) {
+  // `jwt.verify` recalcula la firma sobre header+payload y la compara con la
+  // recibida; cualquier alteración de un solo carácter del payload (p. ej.
+  // cambiar "rol":"profesor" por "admin") invalida la firma. Los errores de la
+  // librería se traducen a AppError para no exponer detalles de la causa.
   try {
     return jwt.verify(token, env.JWT_SECRET, { issuer: env.JWT_ISSUER });
   } catch (error) {
@@ -64,8 +77,12 @@ const AuthService = {
    * @throws {AppError} 401 si las credenciales no son válidas.
    */
   async login({ email, password }, contexto = {}) {
+    // Paso 1 (capa de datos): recuperar la cuenta, incluyendo el hash, por correo.
     const usuario = await UsuariosRepository.buscarPorEmailConHash(email);
 
+    // Paso 2 (verificación): el operador `&&` evalúa en cortocircuito, de modo
+    // que bcrypt solo se ejecuta cuando la cuenta existe. Ambos casos de fallo
+    // desembocan en la misma rama y en el mismo mensaje hacia el cliente.
     const credencialesValidas =
       usuario !== null && (await verificarPassword(password, usuario.password_hash));
 
@@ -88,6 +105,8 @@ const AuthService = {
       ...contexto,
     });
 
+    // Paso 3 (emisión): se firma el token y el usuario se proyecta a DTO, lo que
+    // garantiza que `password_hash` nunca abandone el servidor.
     return {
       token: firmarToken(usuario),
       expiresIn: env.JWT_EXPIRES_IN,

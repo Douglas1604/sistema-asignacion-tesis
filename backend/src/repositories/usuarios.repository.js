@@ -25,6 +25,8 @@ const UsuariosRepository = {
    * @returns {Promise<object|null>} Fila con hash, o null si no existe.
    */
   async buscarPorEmailConHash(email) {
+    // El JOIN con `roles` resuelve en la misma consulta el nombre del rol que
+    // viajará como claim en el JWT. `LIMIT 1` refuerza la unicidad del correo.
     const sql = `
       SELECT u.id, u.username, u.email, u.password_hash, u.rol_id, r.nombre AS rol_nombre
       FROM usuarios u
@@ -32,6 +34,7 @@ const UsuariosRepository = {
       WHERE u.email = ?
       LIMIT 1
     `;
+    // mysql2 devuelve la tupla [filas, metadatosDeColumnas]; solo interesan las filas.
     const [filas] = await pool.query(sql, [email]);
     return filas[0] || null;
   },

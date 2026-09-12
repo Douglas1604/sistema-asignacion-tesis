@@ -61,6 +61,9 @@ const AsignacionesService = {
    * @throws {AppError} 422 si faltan precondiciones del sorteo.
    */
   async registrar(payload, contexto = {}) {
+    // A esta altura el middleware `validate` ya garantizó la forma del cuerpo.
+    // Aquí se aplican las reglas que dependen del estado del sistema (catálogo)
+    // o de la semántica del negocio, que un esquema estático no puede expresar.
     const esTesis = Boolean(payload.es_tesis);
     const tipoEventoId = resolverTipoEvento(payload.tipo_evento_id, esTesis);
 
@@ -69,6 +72,9 @@ const AsignacionesService = {
     let registros;
     let modo;
 
+    // Bifurcación por modalidad. Las comprobaciones se repiten aquí aunque el
+    // esquema Zod ya las aplique: es defensa en profundidad, de modo que el
+    // servicio sigue siendo correcto si se invoca desde otro punto de entrada.
     if (esTesis) {
       // El jurado debe estar completo: tres catedráticos, ni más ni menos.
       if (payload.profesores.length !== CATEDRATICOS_POR_JURADO) {
@@ -113,9 +119,13 @@ const AsignacionesService = {
    * @returns {Promise<{items: object[], meta: object}>}
    */
   async listarHistorial({ limite = 500, pagina = 1 } = {}) {
+    // Paginación por desplazamiento: la página N comienza tras (N - 1) * límite
+    // filas. `Math.min` impone el tope aunque el validador cambiara en el futuro.
     const limiteSeguro = Math.min(limite, LIMITE_MAXIMO);
     const desplazamiento = (pagina - 1) * limiteSeguro;
 
+    // Ambas consultas son independientes: `Promise.all` las lanza en paralelo
+    // sobre conexiones distintas del pool y reduce la latencia total.
     const [filas, total] = await Promise.all([
       AsignacionesRepository.listarParaReporte({
         limite: limiteSeguro,
@@ -138,6 +148,8 @@ const AsignacionesService = {
    * @throws {AppError} 404 si no existe esa asignación.
    */
   async eliminarAsignacionAlumno({ carnet, fecha }, contexto = {}) {
+    // Se consulta antes de borrar para distinguir "no existe" (404) de
+    // "eliminado" (200): un DELETE sobre cero filas no es un error SQL.
     const existentes = await AsignacionesRepository.contarPorAlumnoYFecha(
       carnet,
       fecha

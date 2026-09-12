@@ -20,6 +20,10 @@ import Swal from 'sweetalert2';
   templateUrl: './dashboard.html',
   styleUrl: './dashboard.css'
 })
+/**
+ * Pantalla de inicio posterior al login: métricas agregadas del historial y
+ * borrado puntual de asignaciones individuales.
+ */
 export class DashboardComponent implements OnInit {
   // Variables para guardar las métricas que se muestran en las tarjetas superiores
   totalSorteos = 0; 

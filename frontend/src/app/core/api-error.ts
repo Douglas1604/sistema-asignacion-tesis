@@ -43,6 +43,9 @@ const MENSAJES_POR_ESTADO: Record<number, string> = {
  * Indica si el cuerpo recibido tiene la forma de error de nuestra API.
  * @param cuerpo Cuerpo de la respuesta de error.
  */
+// Guarda de tipo (type guard) de TypeScript: el retorno `cuerpo is ApiErrorResponse`
+// hace que, dentro del `if` que la invoca, el compilador trate `cuerpo` con ese
+// tipo, sin recurrir a conversiones forzadas.
 function esErrorDeLaApi(cuerpo: unknown): cuerpo is ApiErrorResponse {
   return (
     typeof cuerpo === 'object' &&

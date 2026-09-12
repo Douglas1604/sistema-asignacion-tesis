@@ -16,6 +16,8 @@ const UsuariosService = {
    * @returns {Promise<{items: object[], meta: object}>}
    */
   async listar({ limite = 20, pagina = 1 } = {}) {
+    // Mismo patrón de paginación por desplazamiento que el historial de
+    // asignaciones, con un tope más bajo por tratarse de datos de cuentas.
     const limiteSeguro = Math.min(limite, LIMITE_MAXIMO);
     const desplazamiento = (pagina - 1) * limiteSeguro;
 

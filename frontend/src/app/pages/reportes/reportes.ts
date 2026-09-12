@@ -22,6 +22,10 @@ import * as XLSX from 'xlsx';
   templateUrl: './reportes.html',
   styleUrl: './reportes.css'
 })
+/**
+ * Pantalla de reportes: transforma el historial plano de la API (una fila por
+ * pareja catedrático-alumno) en lotes agrupados y exportables como acta.
+ */
 export class ReportesComponent implements OnInit {
   // Arreglo principal que alimenta la tabla de la vista con los lotes de sorteo ya agrupados
   sorteosAgrupados: any[] = []; 
@@ -68,7 +72,9 @@ export class ReportesComponent implements OnInit {
           if (row.alumno_info && row.alumno_info.includes('undefined')) return;
           if (row.profesor_nombre && row.profesor_nombre.includes('undefined')) return;
 
-          // Clave única para identificar a qué lote de sorteo pertenece esta fila
+          // Clave única para identificar a qué lote de sorteo pertenece esta fila.
+          // Agrupar en un Map es O(n): una sola pasada, con búsqueda por clave en
+          // tiempo constante, frente al O(n²) de comparar cada fila con las demás.
           const clave = `${row.modalidad}_${row.fecha}`;
           
           // Si el lote no existe en el Map, lo inicializamos con Sets para evitar duplicados

@@ -38,7 +38,12 @@ function manejarExceso(accionAuditoria) {
   };
 }
 
-/** Limitador general de toda la API. */
+/**
+ * Limitador general de toda la API.
+ * Algoritmo de ventana fija por IP: cada dirección dispone de `RATE_LIMIT_MAX`
+ * peticiones por ventana. `standardHeaders` publica las cabeceras `RateLimit-*`
+ * para que un cliente legítimo conozca su cupo restante.
+ */
 const apiLimiter = rateLimit({
   windowMs: env.RATE_LIMIT_WINDOW_MS,
   max: env.RATE_LIMIT_MAX,
@@ -49,7 +54,12 @@ const apiLimiter = rateLimit({
   handler: manejarExceso("RATE_LIMIT_API"),
 });
 
-/** Limitador estricto para el inicio de sesión. */
+/**
+ * Limitador estricto para el inicio de sesión.
+ * Complementa el coste computacional de bcrypt: aunque cada intento es lento,
+ * limitar el número de intentos por IP vuelve impracticable la fuerza bruta
+ * y el relleno de credenciales (credential stuffing).
+ */
 const loginLimiter = rateLimit({
   windowMs: env.LOGIN_RATE_LIMIT_WINDOW_MS,
   max: env.LOGIN_RATE_LIMIT_MAX,

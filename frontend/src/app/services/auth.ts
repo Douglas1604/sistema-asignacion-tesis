@@ -26,6 +26,14 @@ import { ApiResponse, LoginRequest, LoginData, SesionLocal, Usuario } from '../m
 const CLAVE_TOKEN = 'auth_token';
 const CLAVE_SESION = 'auth_session';
 
+/**
+ * Servicio singleton que gestiona el ciclo de vida de la sesión en el cliente:
+ * inicio, persistencia, restauración al recargar y cierre.
+ *
+ * @description El estado se expone mediante Signals de Angular: `sesion` y
+ * `autenticado` se recalculan automáticamente cuando cambia `sesionActual`,
+ * sin necesidad de suscripciones manuales en los componentes.
+ */
 @Injectable({
   providedIn: 'root',
 })
@@ -48,6 +56,12 @@ export class AuthService {
    *
    * @param credenciales Correo y contraseña en claro; el servidor los verifica.
    * @returns Datos de la sesión iniciada.
+   * @throws {HttpErrorResponse} Emitido por el Observable ante 401, 422 o 429.
+   *
+   * @description Pipeline RxJS: `map` desenvuelve la envoltura `{success, data}`
+   * y `tap` persiste la sesión como efecto secundario sin alterar el valor
+   * emitido. Al ser un Observable frío, la petición HTTP no se envía hasta que
+   * el componente se suscribe.
    */
   login(credenciales: LoginRequest): Observable<LoginData> {
     return this.http
@@ -78,7 +92,12 @@ export class AuthService {
       .pipe(map((respuesta) => respuesta.data));
   }
 
-  /** Token de acceso actual, o null si no hay sesión. */
+  /**
+   * Token de acceso actual, o null si no hay sesión.
+   * Se lee de `localStorage` en cada llamada (no de memoria) para reflejar de
+   * inmediato un cierre de sesión realizado en otra parte de la aplicación.
+   * @returns El JWT en formato compacto, o null.
+   */
   obtenerToken(): string | null {
     try {
       return localStorage.getItem(CLAVE_TOKEN);
@@ -88,7 +107,10 @@ export class AuthService {
     }
   }
 
-  /** Identidad mínima del usuario en sesión, o null. */
+  /**
+   * Identidad mínima del usuario en sesión.
+   * @returns La sesión en memoria, o null.
+   */
   obtenerSesion(): SesionLocal | null {
     return this.sesionActual();
   }
@@ -98,6 +120,10 @@ export class AuthService {
    *
    * Es una comprobación de CONVENIENCIA para la interfaz. No es una medida de
    * seguridad: la validez real del token la decide el backend en cada petición.
+   * No se decodifica ni se comprueba la expiración del JWT en el cliente: un
+   * token caducado provocará un 401 que el interceptor gestiona cerrando sesión.
+   *
+   * @returns true si existe un token almacenado.
    */
   estaAutenticado(): boolean {
     return this.obtenerToken() !== null;

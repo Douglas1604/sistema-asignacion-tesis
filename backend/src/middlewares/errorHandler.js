@@ -33,6 +33,8 @@ function esErrorDeBaseDeDatos(error) {
  * @returns {AppError}
  */
 function normalizar(error) {
+  // El orden de las comprobaciones va de lo más específico a lo más genérico:
+  // la última rama actúa como red de seguridad para cualquier caso no previsto.
   if (error instanceof AppError) return error;
 
   // Cuerpo que supera el límite configurado en express.json().
@@ -66,6 +68,17 @@ function normalizar(error) {
 
 /**
  * Middleware final de la cadena de Express.
+ *
+ * @description Aplica una política de divulgación en dos niveles: el cliente
+ * recibe solo código y mensaje seguros junto al `requestId`; el log del servidor
+ * conserva el mensaje original y el stack. El `requestId` es el enlace entre
+ * ambos mundos cuando un usuario reporta una incidencia.
+ *
+ * @param {Error} error Excepción propagada con `next(error)` o lanzada en un handler.
+ * @param {import("express").Request} req Petición que originó el error.
+ * @param {import("express").Response} res Respuesta a emitir.
+ * @param {import("express").NextFunction} next No se usa, pero su presencia es obligatoria.
+ * @returns {void}
  * @type {import("express").ErrorRequestHandler}
  */
 // eslint-disable-next-line no-unused-vars -- Express identifica el manejador de errores por sus 4 parámetros.

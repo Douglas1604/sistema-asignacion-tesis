@@ -8,6 +8,7 @@
  * Respuesta exitosa.
  * @param {*} data Carga útil ya convertida a DTO (nunca filas crudas de la BD).
  * @param {object} [meta] Metadatos opcionales (total, paginación...).
+ * @returns {{success: true, data: *, meta?: object}} Envoltura de éxito.
  */
 function ok(data, meta) {
   const cuerpo = { success: true, data };
@@ -21,6 +22,8 @@ function ok(data, meta) {
  * @param {string} message Mensaje seguro para el cliente.
  * @param {object} [details] Detalles de validación seguros.
  * @param {string} [requestId] Identificador de la petición, para cruzar con los logs.
+ * @returns {{success: false, error: {code: string, message: string, details?: object, requestId?: string}}}
+ * Envoltura de error.
  */
 function fail(code, message, details, requestId) {
   const error = { code, message };

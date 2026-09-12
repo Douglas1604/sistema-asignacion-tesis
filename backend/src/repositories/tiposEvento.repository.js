@@ -5,6 +5,11 @@
 
 const { pool } = require("../config/db");
 
+/**
+ * Repositorio del catálogo de modalidades.
+ * Encapsula el SQL para que las capas superiores dependan de operaciones con
+ * significado de negocio (`listar`, `existe`) y no de la estructura de la tabla.
+ */
 const TiposEventoRepository = {
   /**
    * Devuelve el catálogo completo de modalidades.

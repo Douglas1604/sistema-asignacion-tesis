@@ -38,13 +38,30 @@ function esPeticionALaApi(url: string): boolean {
   }
 }
 
+/**
+ * Interceptor funcional registrado en `app.config.ts` mediante `withInterceptors`.
+ *
+ * @description Se ejecuta para CADA petición de HttpClient, en dos fases:
+ *  - Salida: si hay token y el destino es la API propia, clona la petición
+ *    añadiendo `Authorization: Bearer <token>`.
+ *  - Entrada: observa la respuesta; ante un 401 de la API cierra la sesión y
+ *    redirige al login. El error se relanza para que el componente lo muestre.
+ *
+ * @param req Petición saliente (inmutable).
+ * @param next Siguiente manejador de la cadena de interceptores.
+ * @returns Observable de la respuesta HTTP.
+ */
 export const authInterceptor: HttpInterceptorFn = (req, next) => {
+  // `inject` es válido aquí porque Angular ejecuta el interceptor dentro de
+  // un contexto de inyección; no hace falta una clase con constructor.
   const authService = inject(AuthService);
   const router = inject(Router);
 
   const paraNuestraApi = esPeticionALaApi(req.url);
   const token = authService.obtenerToken();
 
+  // HttpRequest es inmutable por diseño: para añadir la cabecera se crea una
+  // copia con `clone`, lo que evita efectos colaterales entre interceptores.
   const peticion =
     token && paraNuestraApi
       ? req.clone({ setHeaders: { Authorization: `Bearer ${token}` } })

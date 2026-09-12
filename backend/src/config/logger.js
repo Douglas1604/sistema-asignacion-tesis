@@ -31,6 +31,8 @@ const MARCA_REDACTADO = "[REDACTADO]";
  * @returns {*} Copia segura para escribir en el log.
  */
 function redactar(valor, profundidad = 0) {
+  // Caso base de la recursión. El tope de profundidad protege frente a
+  // estructuras cíclicas o excesivamente anidadas que desbordarían la pila.
   if (profundidad > 6 || valor === null || typeof valor !== "object") {
     return valor;
   }
@@ -68,6 +70,11 @@ function escribir(nivel, mensaje, contexto = {}) {
   else console.log(linea);
 }
 
+/**
+ * Fachada de registro utilizada por el resto de la aplicación.
+ * Desacopla el código de negocio del destino físico del log (hoy la consola,
+ * mañana un colector externo) sin modificar a los consumidores.
+ */
 const logger = {
   info: (mensaje, contexto) => escribir("info", mensaje, contexto),
   warn: (mensaje, contexto) => escribir("warn", mensaje, contexto),

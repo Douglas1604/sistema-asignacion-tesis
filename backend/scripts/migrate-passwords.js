@@ -24,6 +24,14 @@ const { hashPassword, esHashBcrypt } = require("../src/utils/password");
 /** Sin esta bandera el script solo informa de lo que haría. */
 const APLICAR = process.argv.includes("--aplicar");
 
+/**
+ * Detecta las cuentas con contraseña heredada y, en modo aplicación, las
+ * convierte a bcrypt dentro de una única transacción (todo o nada).
+ *
+ * @returns {Promise<void>}
+ * @throws {Error} Si falla la consulta o alguna actualización; en ese caso se
+ * revierte la transacción y ninguna cuenta queda a medio migrar.
+ */
 async function main() {
   const [usuarios] = await pool.query(
     "SELECT id, username, email, password_hash FROM usuarios"

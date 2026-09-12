@@ -4,7 +4,11 @@
 
 const { z } = require("zod");
 
-/** Identificador numérico positivo procedente de la URL. */
+/**
+ * Identificador numérico positivo procedente de la URL.
+ * `coerce` es necesario porque todo segmento de ruta y de query llega como
+ * string; la coerción ocurre antes de las reglas `int` y `positive`.
+ */
 const idParam = z.coerce.number().int().positive();
 
 /** Paginación común a los listados. */
@@ -19,6 +23,9 @@ const paginacionQuery = z
  * Texto corto obligatorio, recortado de espacios.
  * @param {number} max Longitud máxima permitida.
  * @param {string} etiqueta Nombre del campo para el mensaje de error.
+ * @returns {import("zod").ZodString} Esquema reutilizable. El orden importa:
+ * `trim` se aplica antes de `min`, de modo que una cadena de solo espacios
+ * se considera vacía.
  */
 const textoRequerido = (max, etiqueta) =>
   z

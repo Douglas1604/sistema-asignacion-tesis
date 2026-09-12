@@ -30,12 +30,17 @@ function formatearProblemas(error) {
  */
 function validate(esquemas) {
   return (req, res, next) => {
+    // Se acumulan los problemas de todas las partes en lugar de cortar en el
+    // primero: el cliente recibe en una sola respuesta la lista completa de
+    // campos a corregir.
     const problemas = [];
 
     for (const parte of ["body", "params", "query"]) {
       const esquema = esquemas[parte];
       if (!esquema) continue;
 
+      // `safeParse` además de validar TRANSFORMA: recorta espacios, pasa el
+      // correo a minúsculas, convierte "5" en 5 y descarta claves no declaradas.
       const resultado = esquema.safeParse(req[parte]);
 
       if (!resultado.success) {

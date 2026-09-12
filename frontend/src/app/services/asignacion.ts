@@ -39,6 +39,8 @@ export class AsignacionService {
    * @param profesor_nombre El nombre (y/o grupo) del catedrático seleccionado.
    * @param alumnos Arreglo con los alumnos que fueron sorteados para este catedrático.
    * @param tipo_evento_id El ID de la modalidad (1 = Privado, 2 = Seminario).
+   * @returns Observable con el resumen `{registros, tipo_evento_id, modo}`.
+   * @throws {HttpErrorResponse} Emitido por el Observable ante 401, 403 o 422.
    */
   guardarTerna(
     profesor_nombre: string,
@@ -66,6 +68,8 @@ export class AsignacionService {
    * @param alumno El estudiante que defenderá su tesis.
    * @param profesores Arreglo con los 3 catedráticos (Presidente, Vocal 1, Vocal 2).
    * @param tipo_evento_id El ID de la modalidad (3 = Tesis).
+   * @returns Observable con el resumen `{registros: 3, tipo_evento_id, modo: 'tesis'}`.
+   * @throws {HttpErrorResponse} Emitido por el Observable ante 401, 403 o 422.
    */
   guardarTesis(
     alumno: { carnet: string; nombre_completo: string },
@@ -88,6 +92,7 @@ export class AsignacionService {
   /**
    * @description Pide al servidor todo el historial de asignaciones guardadas.
    * Desenvuelve el campo `data` para que los componentes reciban un arreglo plano.
+   * @returns Observable con las filas del historial (hasta el límite por defecto del backend).
    */
   obtenerAsignaciones(): Observable<AsignacionReporte[]> {
     return this.http
@@ -98,6 +103,10 @@ export class AsignacionService {
   /**
    * @description Elimina un lote completo de asignaciones por su marca de tiempo.
    * @param fecha Fecha del lote en formato dd/mm/aaaa hh:mm.
+   * @returns Observable con el número de filas eliminadas.
+   *
+   * `encodeURIComponent` es imprescindible: la fecha contiene '/', ':' y un
+   * espacio, caracteres con significado estructural en una URL.
    */
   eliminarLote(fecha: string): Observable<BorradoData> {
     const url = `${this.apiUrl}/lote?fecha=${encodeURIComponent(fecha)}`;
@@ -110,6 +119,7 @@ export class AsignacionService {
    * @description Elimina la asignación de un alumno dentro de un sorteo concreto.
    * @param carnet Carnet del estudiante.
    * @param fecha Fecha del sorteo en formato dd/mm/aaaa hh:mm.
+   * @returns Observable con el número de filas eliminadas.
    */
   eliminarAsignacionAlumno(carnet: string, fecha: string): Observable<BorradoData> {
     const url =
@@ -121,6 +131,7 @@ export class AsignacionService {
 
   /**
    * @description Obtiene el catálogo de modalidades de evento.
+   * @returns Observable con la lista de modalidades disponibles.
    */
   obtenerTiposEvento(): Observable<TipoEvento[]> {
     return this.http
@@ -131,6 +142,8 @@ export class AsignacionService {
   /**
    * Reduce un alumno del sorteo a los campos que acepta la API.
    * @param alumno Alumno tal y como lo maneja la ruleta.
+   * @returns Objeto con solo `carnet` y `nombre_completo`; el backend rechazaría
+   *          (por `.strict()`) campos no declarados en el contrato.
    */
   private aAlumnoAsignacion(alumno: {
     carnet: string;

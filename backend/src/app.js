@@ -39,6 +39,14 @@ const apiV1Routes = require("./routes");
  * se permiten porque no proceden de un navegador y no hay sesión que robar.
  */
 const corsOptions = {
+  /**
+   * Decide dinámicamente si un origen puede consumir la API.
+   *
+   * @param {string|undefined} origin Valor de la cabecera `Origin` enviada por el navegador.
+   * @param {(error: Error|null, permitir?: boolean) => void} callback Continuación de `cors`.
+   * @throws {Error} Entrega al callback un error con código `CORS_NOT_ALLOWED`, que el
+   * manejador central traduce a 403 sin revelar la lista de orígenes admitidos.
+   */
   origin(origin, callback) {
     if (!origin || env.corsOrigins.includes(origin)) {
       return callback(null, true);
@@ -48,9 +56,16 @@ const corsOptions = {
     return callback(error);
   },
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  // `Authorization` no es una cabecera "simple" según la especificación Fetch:
+  // su presencia obliga al navegador a enviar una petición OPTIONS previa
+  // (preflight). Solo si la respuesta la lista aquí se emite la petición real.
   allowedHeaders: ["Content-Type", "Authorization"],
+  // Sin exponerla explícitamente, JavaScript en el navegador no podría leer la
+  // cabecera de correlación aunque viaje en la respuesta.
   exposedHeaders: ["X-Request-Id"],
   credentials: true,
+  // El navegador cachea el resultado del preflight durante 10 minutos, lo que
+  // evita duplicar cada petición autenticada con un OPTIONS adicional.
   maxAge: 600,
 };
 
