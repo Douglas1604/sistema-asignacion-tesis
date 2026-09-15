@@ -11,7 +11,8 @@ const validate = require("../middlewares/validate");
 const { requireAuth, requireRole, ROLES } = require("../middlewares/auth");
 const {
   crearAsignacionSchema,
-  eliminarLoteQuerySchema,
+  crearTernaTesisSchema,
+  eliminarLoteParamsSchema,
   eliminarAsignacionAlumnoParamsSchema,
   listarAsignacionesQuerySchema,
 } = require("../validators/asignaciones.validators");
@@ -75,6 +76,9 @@ router.get(
  *         Se crea una fila por alumno.
  *
  *       Cada registro se escribe dentro de una transacción: o se guarda el lote completo o no se guarda nada.
+ *
+ *       Todas las filas de la petición comparten un `lote_id` generado por el servidor y devuelto en la respuesta.
+ *       Para adjuntar otra petición al mismo lote (p. ej. los demás alumnos de una terna de tesis) se reenvía ese `lote_id`.
  *       Requiere rol administrador.
  *     tags: [Asignaciones]
  *     security:
@@ -101,6 +105,7 @@ router.get(
  *                 data:
  *                   type: object
  *                   properties:
+ *                     lote_id: { type: string, format: uuid, example: "3f9c2a1e-8b7d-4c5e-9f10-2a3b4c5d6e7f" }
  *                     registros: { type: integer, example: 3 }
  *                     tipo_evento_id: { type: integer, example: 3 }
  *                     modo: { type: string, enum: [tesis, terna], example: tesis }
@@ -110,6 +115,10 @@ router.get(
  *         $ref: '#/components/responses/NoAutenticado'
  *       403:
  *         $ref: '#/components/responses/SinPermisos'
+ *       404:
+ *         $ref: '#/components/responses/NoEncontrado'
+ *       409:
+ *         description: El `lote_id` indicado pertenece a otra modalidad.
  *       413:
  *         $ref: '#/components/responses/CuerpoDemasiadoGrande'
  *       422:
@@ -127,19 +136,74 @@ router.post(
 
 /**
  * @swagger
- * /asignaciones/lote:
+ * /asignaciones/terna:
+ *   post:
+ *     summary: Registra de forma atómica una terna de tesis completa
+ *     description: |
+ *       Recibe el jurado (exactamente 3 catedráticos, en orden Presidente, Vocal 1, Vocal 2)
+ *       y todos los alumnos que examinará. Se insertan `alumnos × 3` filas en una única
+ *       transacción MariaDB (`START TRANSACTION` … `COMMIT`) y bajo un único `lote_id`.
+ *       Si cualquier inserción falla se ejecuta `ROLLBACK`: ningún alumno de la terna queda guardado.
+ *       Requiere rol administrador.
+ *     tags: [Asignaciones]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/CrearTernaTesis'
+ *     responses:
+ *       201:
+ *         description: Terna registrada completa.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean, example: true }
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     lote_id: { type: string, format: uuid, example: "3f9c2a1e-8b7d-4c5e-9f10-2a3b4c5d6e7f" }
+ *                     registros: { type: integer, example: 12 }
+ *                     alumnos: { type: integer, example: 4 }
+ *                     tipo_evento_id: { type: integer, example: 3 }
+ *                     modo: { type: string, example: tesis }
+ *       401:
+ *         $ref: '#/components/responses/NoAutenticado'
+ *       403:
+ *         $ref: '#/components/responses/SinPermisos'
+ *       413:
+ *         $ref: '#/components/responses/CuerpoDemasiadoGrande'
+ *       422:
+ *         $ref: '#/components/responses/ErrorValidacion'
+ *       500:
+ *         description: La transacción falló y se revirtió; no se guardó ninguna fila.
+ */
+router.post(
+  "/terna",
+  requireRole(ROLES.ADMIN),
+  validate({ body: crearTernaTesisSchema }),
+  AsignacionesController.crearTernaTesis
+);
+
+/**
+ * @swagger
+ * /asignaciones/lote/{lote_id}:
  *   delete:
  *     summary: Elimina un lote completo de asignaciones
- *     description: Borra todas las asignaciones que comparten la marca de tiempo indicada, que es como el módulo de reportes identifica un lote de sorteo. Operación irreversible; requiere rol administrador y queda registrada en la pista de auditoría.
+ *     description: Borra todas las asignaciones que comparten el `lote_id` indicado. Un lote corresponde a un guardado del sorteo; otros lotes registrados en el mismo minuto no se ven afectados. Operación irreversible; requiere rol administrador y queda registrada en la pista de auditoría.
  *     tags: [Asignaciones]
  *     security:
  *       - bearerAuth: []
  *     parameters:
- *       - in: query
- *         name: fecha
+ *       - in: path
+ *         name: lote_id
  *         required: true
- *         description: Marca de tiempo del lote, en formato dd/mm/aaaa hh:mm.
- *         schema: { type: string, example: "12/09/2026 10:30" }
+ *         description: Identificador del lote (UUID) devuelto al registrar y en el historial.
+ *         schema: { type: string, format: uuid, example: "3f9c2a1e-8b7d-4c5e-9f10-2a3b4c5d6e7f" }
  *     responses:
  *       200:
  *         description: Lote eliminado.
@@ -162,36 +226,34 @@ router.post(
  *       422:
  *         $ref: '#/components/responses/ErrorValidacion'
  */
-// `/lote` se declara ANTES que `/alumno/:carnet/:fecha`. Express evalúa las
-// rutas en orden de registro; aunque aquí no colisionan (difieren en número de
-// segmentos), se sigue la convención de registrar las rutas literales antes
-// que las parametrizadas.
+// Las dos rutas de borrado no colisionan: difieren en número de segmentos
+// (`/lote/:lote_id` frente a `/lote/:lote_id/alumno/:carnet`) y Express exige
+// coincidencia completa de la ruta.
 router.delete(
-  "/lote",
+  "/lote/:lote_id",
   requireRole(ROLES.ADMIN),
-  validate({ query: eliminarLoteQuerySchema }),
+  validate({ params: eliminarLoteParamsSchema }),
   AsignacionesController.eliminarLote
 );
 
 /**
  * @swagger
- * /asignaciones/alumno/{carnet}/{fecha}:
+ * /asignaciones/lote/{lote_id}/alumno/{carnet}:
  *   delete:
  *     summary: Elimina la asignación de un alumno dentro de un lote
- *     description: Borra las filas de un alumno concreto en el sorteo indicado. En tesis, el alumno tiene una fila por cada miembro del jurado y se eliminan todas. Requiere rol administrador.
+ *     description: Borra las filas de un alumno concreto en el lote indicado. En tesis, el alumno tiene una fila por cada miembro del jurado y se eliminan todas. Requiere rol administrador.
  *     tags: [Asignaciones]
  *     security:
  *       - bearerAuth: []
  *     parameters:
  *       - in: path
+ *         name: lote_id
+ *         required: true
+ *         schema: { type: string, format: uuid, example: "3f9c2a1e-8b7d-4c5e-9f10-2a3b4c5d6e7f" }
+ *       - in: path
  *         name: carnet
  *         required: true
  *         schema: { type: string, maxLength: 50, example: "1990-12-3456" }
- *       - in: path
- *         name: fecha
- *         required: true
- *         description: Marca de tiempo del sorteo, en formato dd/mm/aaaa hh:mm (codificada en la URL).
- *         schema: { type: string, example: "12/09/2026 10:30" }
  *     responses:
  *       200:
  *         description: Asignación eliminada.
@@ -215,7 +277,7 @@ router.delete(
  *         $ref: '#/components/responses/ErrorValidacion'
  */
 router.delete(
-  "/alumno/:carnet/:fecha",
+  "/lote/:lote_id/alumno/:carnet",
   requireRole(ROLES.ADMIN),
   validate({ params: eliminarAsignacionAlumnoParamsSchema }),
   AsignacionesController.eliminarAsignacionAlumno
