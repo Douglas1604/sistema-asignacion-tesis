@@ -74,6 +74,29 @@ function requireAuth(req, res, next) {
 }
 
 /**
+ * Roles cuyo acceso se considera crítico: una ruta que los exige revalida el
+ * rol contra la base de datos en cada petición en lugar de fiarse del JWT.
+ */
+const ROLES_ADMINISTRATIVOS = new Set([ROLES.ADMIN]);
+
+/**
+ * Registra un acceso denegado en la pista de auditoría.
+ * @param {import("express").Request} req Petición autenticada.
+ * @param {string} accion Código del evento de auditoría.
+ * @param {object} detalles Información adicional del rechazo.
+ */
+function auditarDenegacion(req, accion, detalles) {
+  logger.auditoria({
+    accion,
+    usuarioId: req.user.id,
+    recurso: req.originalUrl,
+    detalles,
+    requestId: req.id,
+    ip: req.ip,
+  });
+}
+
+/**
  * Exige que el usuario autenticado tenga uno de los roles indicados.
  * Se coloca siempre DESPUÉS de `requireAuth`.
  *
@@ -81,30 +104,75 @@ function requireAuth(req, res, next) {
  * configuración y devuelve el middleware, lo que permite declarar la política
  * de acceso de forma legible en la definición de cada ruta.
  *
+ * @description Dos niveles de comprobación:
+ *  1. Rápido y sin estado: el rol del JWT debe estar entre los permitidos. Si
+ *     no lo está se responde 403 sin tocar la base de datos.
+ *  2. Solo si la ruta exige un rol administrativo: se relee el usuario en la
+ *     base de datos y se exige que siga existiendo (401) y que su rol VIGENTE
+ *     siga estando permitido (403). Un JWT es válido hasta que expira, así que
+ *     sin este paso un administrador degradado o eliminado conservaría sus
+ *     privilegios durante toda la vida del token (hasta `JWT_EXPIRES_IN`).
+ * Las rutas no críticas (sin rol administrativo) mantienen solo el nivel 1.
+ * Si la base de datos falla, el error se propaga y la petición NO continúa
+ * (falla cerrado).
+ *
  * @param {...string} rolesPermitidos Roles que pueden acceder.
  * @returns {import("express").RequestHandler}
- * @throws {AppError} 403, entregado vía `next`, si el rol no está autorizado.
+ * @throws {AppError} Vía `next`: 403 si el rol no está autorizado o fue revocado;
+ * 401 si la cuenta ya no existe.
  */
 function requireRole(...rolesPermitidos) {
-  return (req, res, next) => {
+  // Se decide una sola vez, al declarar la ruta, y no en cada petición.
+  const exigeRevalidacion = rolesPermitidos.some((rol) =>
+    ROLES_ADMINISTRATIVOS.has(rol)
+  );
+
+  return async (req, res, next) => {
     if (!req.user) {
       return next(AppError.unauthorized("Se requiere un token de acceso"));
     }
 
     if (!rolesPermitidos.includes(req.user.rol)) {
       // Registramos el intento: un 403 es una señal de auditoría relevante.
-      logger.auditoria({
-        accion: "ACCESO_DENEGADO",
-        usuarioId: req.user.id,
-        recurso: req.originalUrl,
-        detalles: { rolRequerido: rolesPermitidos, rolActual: req.user.rol },
-        requestId: req.id,
-        ip: req.ip,
+      auditarDenegacion(req, "ACCESO_DENEGADO", {
+        rolRequerido: rolesPermitidos,
+        rolActual: req.user.rol,
       });
       return next(AppError.forbidden("No tienes permisos para esta operación"));
     }
 
-    return next();
+    if (!exigeRevalidacion) {
+      return next();
+    }
+
+    try {
+      const usuario = await AuthService.obtenerUsuarioVigente(req.user.id);
+
+      if (!usuario) {
+        auditarDenegacion(req, "ACCESO_DENEGADO_CUENTA_INEXISTENTE", {
+          rolToken: req.user.rol,
+        });
+        return next(
+          AppError.unauthorized("La cuenta asociada al token ya no existe")
+        );
+      }
+
+      if (!rolesPermitidos.includes(usuario.rol_nombre)) {
+        auditarDenegacion(req, "ACCESO_DENEGADO_ROL_REVOCADO", {
+          rolRequerido: rolesPermitidos,
+          rolToken: req.user.rol,
+          rolVigente: usuario.rol_nombre || null,
+        });
+        return next(AppError.forbidden("No tienes permisos para esta operación"));
+      }
+
+      // Las capas siguientes trabajan con el rol confirmado, no con el del token.
+      req.user.rol = usuario.rol_nombre;
+      req.user.rol_id = usuario.rol_id;
+      return next();
+    } catch (error) {
+      return next(error);
+    }
   };
 }
 
