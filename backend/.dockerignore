@@ -1,0 +1,22 @@
+# Contexto de construcción mínimo: nada de secretos, dependencias locales ni
+# material que no se ejecuta en producción.
+node_modules
+npm-debug.log*
+
+# Secretos locales: la configuración llega por variables de entorno.
+.env
+.env.*
+
+# No se ejecutan en el contenedor.
+tests
+docs
+migrations
+database_schema.sql
+coverage
+*.md
+
+# Metadatos de construcción y control de versiones.
+.git
+.gitignore
+Dockerfile
+.dockerignore

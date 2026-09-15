@@ -1,0 +1,94 @@
+# =========================================================================
+# Despliegue de la API tesis-ruleta detrás del API Gateway Ocelot (Dokploy).
+#
+# Uso local:   cp backend/.env.example .env   (y completar valores reales)
+#              docker compose up -d --build
+# En Dokploy:  las variables se definen en la pestaña "Environment" del
+#              proyecto Compose (Dokploy las escribe en un .env junto a este
+#              archivo). Ver backend/docs/OCELOT-DEPLOY.md.
+#
+# El servicio NO publica puertos en el host: solo es alcanzable dentro de
+# `backend-network`, por lo que el único punto de entrada es el gateway.
+# =========================================================================
+
+name: tesis-ruleta
+
+services:
+  tesis-ruleta-backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: tesis-ruleta-backend:latest
+    restart: unless-stopped
+
+    # Puerto visible solo para otros contenedores de la red (no `ports:`).
+    expose:
+      - "3000"
+
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+
+      # Base de datos (obligatorias: el arranque falla si faltan)
+      DB_HOST: "${DB_HOST:?Defina DB_HOST}"
+      DB_PORT: "${DB_PORT:-3306}"
+      DB_USER: "${DB_USER:?Defina DB_USER}"
+      DB_PASSWORD: "${DB_PASSWORD:?Defina DB_PASSWORD}"
+      DB_NAME: "${DB_NAME:-tesis_ruleta}"
+      DB_CONNECTION_LIMIT: "${DB_CONNECTION_LIMIT:-10}"
+
+      # Autenticación
+      JWT_SECRET: "${JWT_SECRET:?Defina JWT_SECRET con al menos 32 caracteres}"
+      JWT_EXPIRES_IN: "${JWT_EXPIRES_IN:-8h}"
+      JWT_ISSUER: "${JWT_ISSUER:-tesis-ruleta-api}"
+      BCRYPT_ROUNDS: "${BCRYPT_ROUNDS:-12}"
+
+      # CORS: origen(es) exacto(s) del frontend que llama al gateway.
+      CORS_ORIGINS: "${CORS_ORIGINS:?Defina CORS_ORIGINS}"
+
+      # Límites
+      JSON_BODY_LIMIT: "${JSON_BODY_LIMIT:-10kb}"
+      MAX_ALUMNOS_POR_LOTE: "${MAX_ALUMNOS_POR_LOTE:-100}"
+      RATE_LIMIT_WINDOW_MS: "${RATE_LIMIT_WINDOW_MS:-900000}"
+      RATE_LIMIT_MAX: "${RATE_LIMIT_MAX:-300}"
+      LOGIN_RATE_LIMIT_WINDOW_MS: "${LOGIN_RATE_LIMIT_WINDOW_MS:-900000}"
+      LOGIN_RATE_LIMIT_MAX: "${LOGIN_RATE_LIMIT_MAX:-10}"
+
+      # Swagger nunca se expone en producción.
+      SWAGGER_ENABLED: "false"
+
+      # Ocelot es un proxy inverso: sin esto el rate limit vería la IP del
+      # gateway para todos los usuarios.
+      TRUST_PROXY: "${TRUST_PROXY:-true}"
+
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000/api/v1/health').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+    # Endurecimiento del contenedor: sistema de archivos de solo lectura
+    # (la API no escribe en disco; los logs van a stdout), sin capacidades
+    # de Linux y sin escalada de privilegios.
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+    networks:
+      - backend-network
+
+networks:
+  backend-network:
+    # Nombre fijo para que el contenedor de Ocelot (u otro proyecto de
+    # Dokploy) pueda unirse declarándola como `external: true`.
+    name: backend-network
+    driver: bridge
