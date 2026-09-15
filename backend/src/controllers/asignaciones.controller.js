@@ -55,11 +55,26 @@ const AsignacionesController = {
   }),
 
   /**
-   * DELETE /asignaciones/alumno/:carnet/:fecha
+   * POST /asignaciones/terna
+   * @param {import("express").Request} req Cuerpo validado: `{profesores[3], alumnos[], tipo_evento_id?}`.
+   * @param {import("express").Response} res Responde 201 con `{lote_id, registros, alumnos, tipo_evento_id, modo}`.
+   * @returns {Promise<void>}
+   * @throws {AppError} 422 si la terna no es válida; 500 si la transacción falla (sin filas persistidas).
+   */
+  crearTernaTesis: asyncHandler(async (req, res) => {
+    const resultado = await AsignacionesService.registrarTernaTesis(
+      req.body,
+      contextoAuditoria(req)
+    );
+    res.status(201).json(ok(resultado));
+  }),
+
+  /**
+   * DELETE /asignaciones/lote/:lote_id/alumno/:carnet
    * @param {import("express").Request} req `req.params` ya decodificados y validados.
    * @param {import("express").Response} res Responde 200 con `{eliminados}`.
    * @returns {Promise<void>}
-   * @throws {AppError} 404 si no hay asignaciones para ese alumno y fecha.
+   * @throws {AppError} 404 si no hay asignaciones para ese alumno en el lote.
    */
   eliminarAsignacionAlumno: asyncHandler(async (req, res) => {
     const resultado = await AsignacionesService.eliminarAsignacionAlumno(
@@ -70,15 +85,15 @@ const AsignacionesController = {
   }),
 
   /**
-   * DELETE /asignaciones/lote?fecha=dd/mm/aaaa hh:mm
-   * @param {import("express").Request} req Usa `req.validatedQuery.fecha`.
+   * DELETE /asignaciones/lote/:lote_id
+   * @param {import("express").Request} req Usa `req.params.lote_id` (UUID validado).
    * @param {import("express").Response} res Responde 200 con `{eliminados}`.
    * @returns {Promise<void>}
-   * @throws {AppError} 404 si no existe un lote con esa marca de tiempo.
+   * @throws {AppError} 404 si no existe un lote con ese identificador.
    */
   eliminarLote: asyncHandler(async (req, res) => {
     const resultado = await AsignacionesService.eliminarLote(
-      req.validatedQuery.fecha,
+      req.params.lote_id,
       contextoAuditoria(req)
     );
     res.status(200).json(ok(resultado));
