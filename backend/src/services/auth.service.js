@@ -3,13 +3,37 @@
  * Emite y valida los JWT y aplica la política de credenciales.
  */
 
+const { randomBytes } = require("crypto");
+const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const env = require("../config/env");
 const AppError = require("../utils/AppError");
 const logger = require("../config/logger");
-const { verificarPassword } = require("../utils/password");
+const { verificarPassword, esHashBcrypt } = require("../utils/password");
 const UsuariosRepository = require("../repositories/usuarios.repository");
 const { aUsuarioDTO } = require("../dtos/usuario.dto");
+
+/**
+ * Hash bcrypt de relleno, calculado una sola vez al cargar el servicio.
+ *
+ * @description Defensa frente al canal lateral de temporización en el login.
+ * bcrypt es deliberadamente lento (con coste 12, cientos de milisegundos): si
+ * solo se ejecutara cuando la cuenta existe, un correo inexistente respondería
+ * casi al instante y el tiempo de respuesta delataría qué correos están dados
+ * de alta, aunque el mensaje de error sea idéntico.
+ *
+ * Por eso, cuando no hay hash real contra el que comparar, se compara contra
+ * este. Se genera con el MISMO factor de coste que las contraseñas reales
+ * (`BCRYPT_ROUNDS`), que es lo que determina la duración de `compare`. Parte
+ * de 32 bytes aleatorios que no se guardan en ningún sitio: ninguna contraseña
+ * puede coincidir con él de forma práctica, y aun así el resultado se descarta.
+ *
+ * `hashSync` bloquea el arranque una única vez; no afecta a las peticiones.
+ */
+const HASH_DUMMY = bcrypt.hashSync(
+  randomBytes(32).toString("hex"),
+  env.BCRYPT_ROUNDS
+);
 
 /**
  * Firma el token de acceso del usuario.
@@ -80,11 +104,20 @@ const AuthService = {
     // Paso 1 (capa de datos): recuperar la cuenta, incluyendo el hash, por correo.
     const usuario = await UsuariosRepository.buscarPorEmailConHash(email);
 
-    // Paso 2 (verificación): el operador `&&` evalúa en cortocircuito, de modo
-    // que bcrypt solo se ejecuta cuando la cuenta existe. Ambos casos de fallo
-    // desembocan en la misma rama y en el mismo mensaje hacia el cliente.
-    const credencialesValidas =
-      usuario !== null && (await verificarPassword(password, usuario.password_hash));
+    // Paso 2 (verificación en tiempo constante): se ejecuta SIEMPRE exactamente
+    // un `bcrypt.compare` con el mismo coste, exista o no la cuenta.
+    //  - Cuenta con hash bcrypt válido: se compara contra su hash real.
+    //  - Cuenta inexistente, o con contraseña heredada en texto plano (que
+    //    `verificarPassword` rechazaría sin invocar bcrypt): se compara contra
+    //    HASH_DUMMY y el resultado se descarta.
+    // Ambos casos de fallo desembocan en la misma rama, con el mismo mensaje
+    // hacia el cliente y un tiempo de respuesta equivalente.
+    let credencialesValidas = false;
+    if (usuario !== null && esHashBcrypt(usuario.password_hash)) {
+      credencialesValidas = await verificarPassword(password, usuario.password_hash);
+    } else {
+      await bcrypt.compare(password, HASH_DUMMY);
+    }
 
     if (!credencialesValidas) {
       logger.auditoria({
@@ -127,6 +160,19 @@ const AuthService = {
       throw AppError.unauthorized("La cuenta asociada al token ya no existe");
     }
     return aUsuarioDTO(usuario);
+  },
+
+  /**
+   * Relee de la base de datos la identidad y el rol vigentes de un usuario.
+   * La usa el middleware de autorización para no confiar en el rol que viaja
+   * en el JWT cuando la operación es administrativa: el token puede haberse
+   * emitido antes de que el rol se revocara o la cuenta se eliminara.
+   *
+   * @param {number} usuarioId Identificador extraído del token.
+   * @returns {Promise<object|null>} Fila con `rol_nombre`, o null si la cuenta ya no existe.
+   */
+  async obtenerUsuarioVigente(usuarioId) {
+    return UsuariosRepository.buscarPorId(usuarioId);
   },
 
   verificarToken,

@@ -138,3 +138,120 @@ test("token válido da acceso al perfil", async () => {
   assert.equal(respuesta.body.data.email, ADMIN.email);
   assert.equal(respuesta.body.data.password_hash, undefined);
 });
+
+// ---------------------------------------------------------------------------
+// Canal lateral de temporización (timing attack)
+// ---------------------------------------------------------------------------
+
+/**
+ * Sustituye temporalmente `bcrypt.compare` por un espía que registra el hash
+ * contra el que se compara y delega en la implementación real.
+ * @returns {{llamadas: string[], restaurar: () => void}}
+ */
+function espiarBcryptCompare() {
+  const bcrypt = require("bcryptjs");
+  const original = bcrypt.compare;
+  const llamadas = [];
+  bcrypt.compare = (plano, hash, ...resto) => {
+    llamadas.push(hash);
+    return original.call(bcrypt, plano, hash, ...resto);
+  };
+  return { llamadas, restaurar: () => (bcrypt.compare = original) };
+}
+
+/** Hash bcrypt con el mismo coste que exige la configuración. */
+const env = require("../src/config/env");
+const FORMATO_HASH_MISMO_COSTE = new RegExp(
+  "^\\$2[aby]\\$" + String(env.BCRYPT_ROUNDS).padStart(2, "0") + "\\$.{53}$"
+);
+
+test("con correo inexistente se ejecuta bcrypt contra el hash dummy", async () => {
+  const espia = espiarBcryptCompare();
+  try {
+    const respuesta = await request(app())
+      .post("/api/v1/auth/login")
+      .send({ email: "nadie@umg.edu.gt", password: PASSWORD_ADMIN });
+
+    assert.equal(respuesta.status, 401);
+    assert.equal(espia.llamadas.length, 1, "debe invocarse bcrypt exactamente una vez");
+    assert.match(espia.llamadas[0], FORMATO_HASH_MISMO_COSTE, "mismo coste que un hash real");
+  } finally {
+    espia.restaurar();
+  }
+});
+
+test("con contraseña incorrecta se ejecuta bcrypt contra el hash real", async () => {
+  const UsuariosRepository = require("../src/repositories/usuarios.repository");
+  const { password_hash: hashReal } =
+    await UsuariosRepository.buscarPorEmailConHash(ADMIN.email);
+
+  const espia = espiarBcryptCompare();
+  try {
+    const respuesta = await request(app())
+      .post("/api/v1/auth/login")
+      .send({ email: ADMIN.email, password: "contrasena-equivocada" });
+
+    assert.equal(respuesta.status, 401);
+    assert.deepEqual(espia.llamadas, [hashReal]);
+  } finally {
+    espia.restaurar();
+  }
+});
+
+test("una contraseña heredada en texto plano también consume el hash dummy", async () => {
+  const UsuariosRepository = require("../src/repositories/usuarios.repository");
+  const original = UsuariosRepository.buscarPorEmailConHash;
+  UsuariosRepository.buscarPorEmailConHash = async () => ({ ...ADMIN, password_hash: "1234" });
+
+  const espia = espiarBcryptCompare();
+  try {
+    const respuesta = await request(app())
+      .post("/api/v1/auth/login")
+      .send({ email: ADMIN.email, password: "1234" });
+
+    assert.equal(respuesta.status, 401);
+    assert.equal(espia.llamadas.length, 1);
+    assert.match(espia.llamadas[0], FORMATO_HASH_MISMO_COSTE);
+  } finally {
+    espia.restaurar();
+    UsuariosRepository.buscarPorEmailConHash = original;
+  }
+});
+
+test("el tiempo de respuesta no distingue correo inexistente de contraseña incorrecta", async () => {
+  /**
+   * Mide la duración de un intento de login.
+   * @param {string} email Correo a probar.
+   * @returns {Promise<number>} Milisegundos.
+   */
+  const medir = async (email) => {
+    const inicio = process.hrtime.bigint();
+    const respuesta = await request(app())
+      .post("/api/v1/auth/login")
+      .send({ email, password: "contrasena-equivocada" });
+    assert.equal(respuesta.status, 401);
+    return Number(process.hrtime.bigint() - inicio) / 1e6;
+  };
+  const mediana = (valores) => [...valores].sort((a, b) => a - b)[Math.floor(valores.length / 2)];
+
+  // Calentamiento: la primera petición paga la carga perezosa de módulos.
+  await medir(ADMIN.email);
+
+  // Muestras intercaladas para que el ruido del sistema afecte a ambos por igual.
+  const inexistente = [];
+  const passwordMala = [];
+  for (let i = 0; i < 5; i++) {
+    inexistente.push(await medir("nadie@umg.edu.gt"));
+    passwordMala.push(await medir(ADMIN.email));
+  }
+
+  const ratio = mediana(inexistente) / mediana(passwordMala);
+  // Sin la defensa, el correo inexistente respondía en ~1 ms frente a cientos
+  // de ms del bcrypt real (ratio cercano a 0). Con ella ambos ejecutan un
+  // bcrypt del mismo coste; el margen absorbe el ruido del planificador.
+  assert.ok(
+    ratio > 0.6 && ratio < 1.6,
+    `tiempos desiguales: inexistente=${mediana(inexistente).toFixed(1)}ms, ` +
+      `contraseña incorrecta=${mediana(passwordMala).toFixed(1)}ms (ratio ${ratio.toFixed(2)})`
+  );
+});
