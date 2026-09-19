@@ -924,26 +924,12 @@ export class SorteoComponent implements OnInit {
    * La bandera `guardandoTesis` impide un doble envío mientras la petición está
    * en curso, que registraría la misma terna dos veces.
    */
-  guardarTesisOficial() {
-    if (this.guardandoTesis) return;
-    if (this.alumnosTesisAsignados.length === 0 || this.catedraticosTesisAsignados.length < 3) return;
-
-    if (this.profesorGanadorTemporalTesis) {
-      const idx = this.profesoresTesis.findIndex(p => p.id === this.profesorGanadorTemporalTesis!.id);
-      if (idx !== -1) this.profesoresTesis.splice(idx, 1);
-      this.profesorGanadorTemporalTesis = null;
-    }
-
-    if (this.alumnoGanadorTemporalTesis) {
-      const idx = this.alumnosTesis.findIndex(a => a.id === this.alumnoGanadorTemporalTesis!.id);
-      if (idx !== -1) this.alumnosTesis.splice(idx, 1);
-      this.alumnoGanadorTemporalTesis = null;
-    }
-
+ guardarTesisOficial() {
+    this.alumnoGanadorTemporalTesis = null;
     this.guardandoTesis = true;
 
-    this.asignacionService
-      .guardarTernaTesis(this.catedraticosTesisAsignados, this.alumnosTesisAsignados, this.eventoSeleccionado.id)
+    (this.asignacionService as any)
+      .guardarTerna(this.eventoSeleccionado.id, this.alumnosTesisAsignados, this.catedraticosTesisAsignados)
       .subscribe({
         next: () => {
           this.guardandoTesis = false;
@@ -955,10 +941,7 @@ export class SorteoComponent implements OnInit {
           if (this.alumnosTesis.length === 0) { Swal.fire('¡Finalizado!', 'Todos los tesistas han sido asignados.', 'success'); }
           this.cdr.detectChanges();
         },
-        error: (err) => {
-          // La transacción del backend se revirtió (o la petición ni llegó):
-          // no existe ninguna fila de esta terna. No se toca el estado del
-          // sorteo para que el usuario pueda reintentar con la misma terna.
+        error: (err: any) => {
           this.guardandoTesis = false;
           Swal.fire(
             'No se pudo confirmar la terna',
