@@ -124,13 +124,12 @@ test("un jurado de tesis que no tiene 3 catedráticos se rechaza", async () => {
   assert.equal(respuesta.status, 422);
 });
 
-test("la fecha del lote debe respetar el formato esperado", async () => {
+test("un lote_id que no es un UUID válido se rechaza", async () => {
   const peticion = request(app());
   const token = await obtenerToken(peticion);
 
   const respuesta = await request(app())
-    .delete("/api/v1/asignaciones/lote")
-    .query({ fecha: "' OR 1=1 --" })
+    .delete(`/api/v1/asignaciones/lote/${encodeURIComponent("' OR 1=1 --")}`)
     .set("Authorization", `Bearer ${token}`);
 
   assert.equal(respuesta.status, 422);
@@ -174,8 +173,7 @@ test("un usuario no administrador no puede borrar un lote", async () => {
   const token = await obtenerToken(peticion, PROFESOR.email);
 
   const respuesta = await request(app())
-    .delete("/api/v1/asignaciones/lote")
-    .query({ fecha: "12/09/2026 10:30" })
+    .delete("/api/v1/asignaciones/lote/00000000-0000-4000-8000-000000000000")
     .set("Authorization", `Bearer ${token}`);
 
   assert.equal(respuesta.status, 403);

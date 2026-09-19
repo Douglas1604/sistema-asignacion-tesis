@@ -89,12 +89,6 @@ async function instalarDobles() {
     },
   ];
   AsignacionesRepository.contar = async () => 1;
-  AsignacionesRepository.contarPorAlumnoYFecha = async (carnet, fecha) =>
-    carnet === '1990-12-3456' && fecha === '12/09/2026 10:30' ? 3 : 0;
-  AsignacionesRepository.eliminarPorAlumnoYFecha = async () => 3;
-  AsignacionesRepository.contarPorFechaLote = async (fecha) =>
-    fecha === "12/09/2026 10:30" ? 3 : 0;
-  AsignacionesRepository.eliminarLotePorFecha = async () => 3;
 }
 
 /**
