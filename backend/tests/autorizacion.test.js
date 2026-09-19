@@ -114,11 +114,9 @@ test("si la base de datos falla durante la revalidación, no se concede acceso",
   assert.ok(!JSON.stringify(respuesta.body).includes("ECONNREFUSED"));
 });
 
-test("las rutas no críticas mantienen la verificación rápida sin consultar la BD", async () => {
+test("las rutas de lectura también revalidan la cuenta contra la base de datos", async () => {
   const token = await obtenerToken(request(app()));
-  const bd = simularBaseDeDatos(async () => {
-    throw new Error("no debería consultarse");
-  });
+  const bd = simularBaseDeDatos(async () => ADMIN);
 
   const historial = await request(app())
     .get("/api/v1/asignaciones")
@@ -129,10 +127,26 @@ test("las rutas no críticas mantienen la verificación rápida sin consultar la
 
   assert.equal(historial.status, 200);
   assert.equal(catalogo.status, 200);
-  assert.equal(bd.consultas.length, 0);
+  assert.deepEqual(
+    bd.consultas,
+    [ADMIN.id, ADMIN.id],
+    "requireAuth revalida la cuenta en cada lectura, no solo en rutas de admin"
+  );
 });
 
-test("un rol sin privilegios se rechaza sin consultar la BD", async () => {
+test("una cuenta eliminada pierde también el acceso de lectura, no solo el administrativo", async () => {
+  const token = await obtenerToken(request(app()));
+  simularBaseDeDatos(async () => null);
+
+  const historial = await request(app())
+    .get("/api/v1/asignaciones")
+    .set("Authorization", `Bearer ${token}`);
+
+  assert.equal(historial.status, 401);
+  assert.equal(historial.body.error.code, "UNAUTHORIZED");
+});
+
+test("un rol sin privilegios se rechaza tras una única consulta a la BD", async () => {
   const { PROFESOR } = require("./helpers/entorno");
   const token = await obtenerToken(request(app()), PROFESOR.email);
   const bd = simularBaseDeDatos(async () => PROFESOR);
@@ -142,5 +156,9 @@ test("un rol sin privilegios se rechaza sin consultar la BD", async () => {
     .set("Authorization", `Bearer ${token}`);
 
   assert.equal(respuesta.status, 403);
-  assert.equal(bd.consultas.length, 0);
+  assert.equal(
+    bd.consultas.length,
+    1,
+    "requireAuth consulta una vez; requireRole no repite la consulta"
+  );
 });

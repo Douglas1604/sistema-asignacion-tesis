@@ -34,23 +34,30 @@ function extraerToken(req) {
 }
 
 /**
- * Exige un token válido. Deja en `req.user` la identidad autenticada.
+ * Exige un token válido y que la cuenta siga existiendo en la base de datos.
+ * Deja en `req.user` la identidad autenticada, con el rol VIGENTE de la BD.
  *
  * @description Flujo de validación del token en cada petición protegida:
  *  1. Se extrae el JWT de la cabecera `Authorization`.
  *  2. `AuthService.verificarToken` recalcula la firma HMAC con el secreto del
  *     servidor y comprueba expiración (`exp`) y emisor (`iss`).
- *  3. Con la firma ya verificada, los claims se consideran confiables y se
- *     publican en `req.user` para las capas siguientes.
- * La verificación es local y sin estado (stateless): no requiere consultar la BD.
+ *  3. Con la firma ya verificada, se relee la cuenta en la base de datos: un
+ *     JWT es válido hasta que expira, así que sin este paso una cuenta
+ *     eliminada o con el rol cambiado conservaría el acceso que tenía al
+ *     emitirse el token durante toda su vida (hasta `JWT_EXPIRES_IN`).
+ *     `req.user.rol` siempre refleja la base de datos, nunca el claim del
+ *     token.
+ * Si la base de datos falla, el error se propaga y la petición NO continúa
+ * (falla cerrado).
  *
  * @param {import("express").Request} req Petición entrante.
  * @param {import("express").Response} res Respuesta (no se utiliza).
  * @param {import("express").NextFunction} next Continuación de la cadena.
- * @returns {void}
- * @throws {AppError} 401, entregado vía `next`, si el token falta, expiró o fue alterado.
+ * @returns {Promise<void>}
+ * @throws {AppError} 401, entregado vía `next`, si el token falta, expiró,
+ * fue alterado, o la cuenta asociada ya no existe.
  */
-function requireAuth(req, res, next) {
+async function requireAuth(req, res, next) {
   const token = extraerToken(req);
 
   if (!token) {
@@ -58,26 +65,37 @@ function requireAuth(req, res, next) {
   }
 
   try {
-    const payload = AuthService.verificarToken(token);
     // `sub` es una cadena por definición del estándar JWT (RFC 7519); se
     // convierte a número para que coincida con la clave primaria de `usuarios`.
+    const payload = AuthService.verificarToken(token);
+    const usuarioId = Number(payload.sub);
+    const usuario = await AuthService.obtenerUsuarioVigente(usuarioId);
+
+    if (!usuario) {
+      logger.auditoria({
+        accion: "ACCESO_DENEGADO_CUENTA_INEXISTENTE",
+        usuarioId,
+        recurso: req.originalUrl,
+        detalles: { rolToken: payload.rol },
+        requestId: req.id,
+        ip: req.ip,
+      });
+      return next(
+        AppError.unauthorized("La cuenta asociada al token ya no existe")
+      );
+    }
+
     req.user = {
-      id: Number(payload.sub),
-      email: payload.email,
-      rol: payload.rol,
-      rol_id: payload.rol_id,
+      id: usuario.id,
+      email: usuario.email,
+      rol: usuario.rol_nombre,
+      rol_id: usuario.rol_id,
     };
     return next();
   } catch (error) {
     return next(error);
   }
 }
-
-/**
- * Roles cuyo acceso se considera crítico: una ruta que los exige revalida el
- * rol contra la base de datos en cada petición en lugar de fiarse del JWT.
- */
-const ROLES_ADMINISTRATIVOS = new Set([ROLES.ADMIN]);
 
 /**
  * Registra un acceso denegado en la pista de auditoría.
@@ -98,36 +116,20 @@ function auditarDenegacion(req, accion, detalles) {
 
 /**
  * Exige que el usuario autenticado tenga uno de los roles indicados.
- * Se coloca siempre DESPUÉS de `requireAuth`.
+ * Se coloca siempre DESPUÉS de `requireAuth`, que ya revalida la cuenta y el
+ * rol contra la base de datos en cada petición: aquí solo se compara ese rol
+ * ya vigente contra los permitidos, sin una segunda consulta.
  *
  * Se implementa como fábrica (función de orden superior): recibe la
  * configuración y devuelve el middleware, lo que permite declarar la política
  * de acceso de forma legible en la definición de cada ruta.
  *
- * @description Dos niveles de comprobación:
- *  1. Rápido y sin estado: el rol del JWT debe estar entre los permitidos. Si
- *     no lo está se responde 403 sin tocar la base de datos.
- *  2. Solo si la ruta exige un rol administrativo: se relee el usuario en la
- *     base de datos y se exige que siga existiendo (401) y que su rol VIGENTE
- *     siga estando permitido (403). Un JWT es válido hasta que expira, así que
- *     sin este paso un administrador degradado o eliminado conservaría sus
- *     privilegios durante toda la vida del token (hasta `JWT_EXPIRES_IN`).
- * Las rutas no críticas (sin rol administrativo) mantienen solo el nivel 1.
- * Si la base de datos falla, el error se propaga y la petición NO continúa
- * (falla cerrado).
- *
  * @param {...string} rolesPermitidos Roles que pueden acceder.
  * @returns {import("express").RequestHandler}
- * @throws {AppError} Vía `next`: 403 si el rol no está autorizado o fue revocado;
- * 401 si la cuenta ya no existe.
+ * @throws {AppError} 403 si el rol vigente no está entre los permitidos.
  */
 function requireRole(...rolesPermitidos) {
-  // Se decide una sola vez, al declarar la ruta, y no en cada petición.
-  const exigeRevalidacion = rolesPermitidos.some((rol) =>
-    ROLES_ADMINISTRATIVOS.has(rol)
-  );
-
-  return async (req, res, next) => {
+  return (req, res, next) => {
     if (!req.user) {
       return next(AppError.unauthorized("Se requiere un token de acceso"));
     }
@@ -141,38 +143,7 @@ function requireRole(...rolesPermitidos) {
       return next(AppError.forbidden("No tienes permisos para esta operación"));
     }
 
-    if (!exigeRevalidacion) {
-      return next();
-    }
-
-    try {
-      const usuario = await AuthService.obtenerUsuarioVigente(req.user.id);
-
-      if (!usuario) {
-        auditarDenegacion(req, "ACCESO_DENEGADO_CUENTA_INEXISTENTE", {
-          rolToken: req.user.rol,
-        });
-        return next(
-          AppError.unauthorized("La cuenta asociada al token ya no existe")
-        );
-      }
-
-      if (!rolesPermitidos.includes(usuario.rol_nombre)) {
-        auditarDenegacion(req, "ACCESO_DENEGADO_ROL_REVOCADO", {
-          rolRequerido: rolesPermitidos,
-          rolToken: req.user.rol,
-          rolVigente: usuario.rol_nombre || null,
-        });
-        return next(AppError.forbidden("No tienes permisos para esta operación"));
-      }
-
-      // Las capas siguientes trabajan con el rol confirmado, no con el del token.
-      req.user.rol = usuario.rol_nombre;
-      req.user.rol_id = usuario.rol_id;
-      return next();
-    } catch (error) {
-      return next(error);
-    }
+    return next();
   };
 }
 
