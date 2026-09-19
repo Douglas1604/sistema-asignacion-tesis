@@ -776,13 +776,24 @@ export class SorteoComponent implements OnInit {
    * ahí el avance se controla descontando `sobrantesTesis` al guardar cada terna.
    * La guarda `=== 0` es defensiva: con P > 0, `ceil(P / 3)` nunca vale cero.
    */
-  calcularMatematicaTesis() {
-    if (!this.matematicaTesisCalculada && this.profesoresTesis.length > 0 && this.alumnosTesis.length > 0) {
-      this.cantidadTernasTesis = Math.ceil(this.profesoresTesis.length / 3);
-      if (this.cantidadTernasTesis === 0) this.cantidadTernasTesis = 1;
-      this.cupoBaseTesis = Math.floor(this.alumnosTesis.length / this.cantidadTernasTesis);
-      this.sobrantesTesis = this.alumnosTesis.length % this.cantidadTernasTesis;
-      this.matematicaTesisCalculada = true; 
+  calcularMatematicaTesis(ternasForzadas: number = 3) {
+    if (this.alumnosTesis.length > 0) {
+      if (!this.matematicaTesisCalculada) {
+        if (this.profesoresTesis.length > 0) {
+          this.cantidadTernasTesis = Math.ceil(this.profesoresTesis.length / 3);
+        } else {
+          this.cantidadTernasTesis = ternasForzadas;
+        }
+
+        if (this.cantidadTernasTesis === 0) this.cantidadTernasTesis = 1;
+        this.cupoBaseTesis = Math.floor(this.alumnosTesis.length / this.cantidadTernasTesis);
+        this.sobrantesTesis = this.alumnosTesis.length % this.cantidadTernasTesis;
+        this.matematicaTesisCalculada = true;
+      }
+    } else {
+      this.cantidadTernasTesis = ternasForzadas;
+      this.cupoBaseTesis = 0;
+      this.sobrantesTesis = 0;
     }
     this.cdr.detectChanges();
   }
@@ -923,7 +934,96 @@ export class SorteoComponent implements OnInit {
    *     estado local NO avanza; la terna sigue lista para reintentar el guardado.
    * La bandera `guardandoTesis` impide un doble envío mientras la petición está
    * en curso, que registraría la misma terna dos veces.
+   *//**
+   * Abre un modal interactivo para ingresar manualmente los 3 jurados
+   * designados por Coordinación sin necesidad de cargar un Excel de catedráticos.
    */
+  abrirModalJuradoManual() {
+    if (this.alumnosTesis.length === 0) {
+      Swal.fire('Atención', 'Primero debes cargar el archivo Excel con los Alumnos de tesis.', 'warning');
+      return;
+    }
+
+    Swal.fire({
+      title: '<strong>Jurado Designado (Terna)</strong>',
+      html: `
+        <div style="text-align: left; font-family: sans-serif; font-size: 0.95rem;">
+          <p style="color: #666; margin-bottom: 15px;">Ingresa los nombres de los 3 catedráticos asignados para esta terna:</p>
+          
+          <label style="font-weight: bold; color: #003366; display: block; margin-bottom: 4px;">Presidente:</label>
+          <input id="swal-presi" class="swal2-input" placeholder="Nombre completo del Presidente" style="margin: 0 0 12px 0; width: 100%; box-sizing: border-box;">
+          
+          <label style="font-weight: bold; color: #003366; display: block; margin-bottom: 4px;">Vocal 1:</label>
+          <input id="swal-vocal1" class="swal2-input" placeholder="Nombre completo del Vocal 1" style="margin: 0 0 12px 0; width: 100%; box-sizing: border-box;">
+          
+          <label style="font-weight: bold; color: #003366; display: block; margin-bottom: 4px;">Vocal 2:</label>
+          <input id="swal-vocal2" class="swal2-input" placeholder="Nombre completo del Vocal 2" style="margin: 0 0 12px 0; width: 100%; box-sizing: border-box;">
+        </div>
+      `,
+      focusConfirm: false,
+      showCancelButton: true,
+      confirmButtonText: '<i class="fas fa-check"></i> Fijar Jurado',
+      cancelButtonText: 'Cancelar',
+      confirmButtonColor: '#003366',
+      cancelButtonColor: '#6c757d',
+      preConfirm: () => {
+        const presi = (document.getElementById('swal-presi') as HTMLInputElement)?.value?.trim();
+        const vocal1 = (document.getElementById('swal-vocal1') as HTMLInputElement)?.value?.trim();
+        const vocal2 = (document.getElementById('swal-vocal2') as HTMLInputElement)?.value?.trim();
+
+        if (!presi || !vocal1 || !vocal2) {
+          Swal.showValidationMessage('Debes ingresar los nombres de los 3 integrantes del jurado.');
+          return false;
+        }
+
+        if (
+          presi.toLowerCase() === vocal1.toLowerCase() ||
+          presi.toLowerCase() === vocal2.toLowerCase() ||
+          vocal1.toLowerCase() === vocal2.toLowerCase()
+        ) {
+          Swal.showValidationMessage('Los 3 integrantes del jurado deben ser personas distintas.');
+          return false;
+        }
+
+        return { presi, vocal1, vocal2 };
+      }
+    }).then((result) => {
+      if (result.isConfirmed && result.value) {
+        const { presi, vocal1, vocal2 } = result.value;
+
+        this.catedraticosTesisAsignados = [
+          { nombre_completo: presi },
+          { nombre_completo: vocal1 },
+          { nombre_completo: vocal2 }
+        ];
+
+        // Garantiza el cálculo del reparto euclidiano
+        this.calcularMatematicaTesis(3);
+
+        // Fija el cupo exacto de alumnos a sortear para esta terna
+        this.cupoActualTesis = this.cupoBaseTesis + (this.sobrantesTesis > 0 ? 1 : 0);
+
+        Swal.fire({
+          title: '¡Jurado Registrado!',
+          text: `Terna conformada con éxito.\nCupo asignado: ${this.cupoActualTesis} alumnos.\nProcede a sortear a los estudiantes en la ruleta inferior.`,
+          icon: 'success',
+          confirmButtonColor: '#003366'
+        });
+
+        this.cdr.detectChanges();
+      }
+    });
+  }
+
+  /**
+   * Permite limpiar el jurado fijado si se cometió un error de digitación
+   * antes de iniciar el sorteo de alumnos.
+   */
+  cancelarJuradoManual() {
+    this.catedraticosTesisAsignados = [];
+    this.cdr.detectChanges();
+  }
+
 guardarTesisOficial() {
     this.alumnoGanadorTemporalTesis = null;
     this.guardandoTesis = true;

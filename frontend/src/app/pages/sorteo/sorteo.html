@@ -155,13 +155,25 @@
           </div>
           <div class="controles-sorteo">
             <h2>Conformación de Jurado (Terna)</h2>
-            <button class="btn-umg-play" (click)="iniciarSorteoTesisCatedratico()" [disabled]="girandoTesisProfe || catedraticosTesisAsignados.length >= 3 || profesoresTesis.length === 0 || alumnosTesis.length === 0">
+            
+            <!-- Botón 1: Sorteo por Ruleta (cuando hay Excel de docentes) -->
+            <button *ngIf="profesoresTesis.length > 0" class="btn-umg-play" (click)="iniciarSorteoTesisCatedratico()" [disabled]="girandoTesisProfe || catedraticosTesisAsignados.length >= 3 || alumnosTesis.length === 0">
               <i class="fas fa-sync-alt" [class.fa-spin]="girandoTesisProfe"></i> {{ girandoTesisProfe ? 'Girando...' : 'SORTEAR JURADO (' + catedraticosTesisAsignados.length + '/3)' }}
             </button>
+
+            <!-- Botón 2: Ingreso Directo de Jurado Designado -->
+            <button *ngIf="catedraticosTesisAsignados.length < 3" class="btn-umg-play" style="background-color: #003366; margin-top: 10px; width: 100%;" (click)="abrirModalJuradoManual()" [disabled]="girandoTesisProfe || alumnosTesis.length === 0">
+              <i class="fas fa-user-edit"></i> INGRESAR JURADO DESIGNADO
+            </button>
+
+            <!-- Detalle de los integrantes asignados -->
             <div class="resultado-box" *ngIf="catedraticosTesisAsignados.length > 0">
               <ul style="list-style-type: none; padding: 0;">
                 <li *ngFor="let prof of catedraticosTesisAsignados; let idx = index"><i class="fas fa-check-circle" style="color:#10b981;"></i> <strong>{{ idx === 0 ? 'Presidente' : idx === 1 ? 'Vocal 1' : 'Vocal 2' }}:</strong> {{ obtenerNombreCorto(prof.nombre_completo) }}</li>
               </ul>
+              <button *ngIf="alumnosTesisAsignados.length === 0" (click)="cancelarJuradoManual()" style="background: none; border: none; color: #CC0000; cursor: pointer; font-size: 0.85rem; margin-top: 8px; text-decoration: underline;">
+                <i class="fas fa-undo"></i> Cambiar integrantes
+              </button>
             </div>
           </div>
         </div>
