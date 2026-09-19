@@ -8,11 +8,13 @@
 
 /**
  * Fila del historial tal y como la consume el generador de actas del frontend.
+ * `lote_id` es la clave de agrupamiento de las actas y de su borrado.
  * @param {object} fila Fila del repositorio.
- * @returns {{modalidad: string, profesor_nombre: string, alumno_info: string, fecha: string}}
+ * @returns {{lote_id: string, modalidad: string, profesor_nombre: string, alumno_info: string, fecha: string}}
  */
 function aAsignacionReporteDTO(fila) {
   return {
+    lote_id: fila.lote_id,
     modalidad: fila.modalidad,
     profesor_nombre: fila.profesor_nombre,
     alumno_info: fila.alumno_info,
