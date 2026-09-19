@@ -18,6 +18,7 @@ import {
   normalizarCelda,
   MAX_FILAS,
 } from '../../core/excel-seguro';
+import { obtenerEnteroAleatorio, obtenerIndiceAleatorio } from '../../core/crypto-random';
 import Swal from 'sweetalert2';
 import * as XLSX from 'xlsx';
 
@@ -62,6 +63,16 @@ export interface Alumno { id?: number; carnet: string; nombre_completo: string; 
  * Principio de diseño de la animación: el ganador se decide ANTES de girar.
  * La rotación visual se calcula para detenerse exactamente sobre ese índice;
  * la animación comunica el resultado, no lo produce.
+ *
+ * Separación entre DECISIÓN y FÍSICA de la ruleta (fuentes de aleatoriedad):
+ *  - Decisión algorítmica (oficial): el índice del catedrático o alumno ganador
+ *    y la numeración aleatoria de catedráticos (Fisher-Yates) se obtienen con
+ *    `obtenerIndiceAleatorio` / `obtenerEnteroAleatorio` (`core/crypto-random`),
+ *    basados en `crypto.getRandomValues` y sin sesgo de módulo.
+ *  - Física cosmética: únicamente el número de vueltas extra de la animación
+ *    (`calcularRotacionExacta`) usa `Math.random()`. Son múltiplos de 360°, por
+ *    lo que no pueden alterar la porción que queda bajo la aguja: cambian cómo
+ *    se ve el giro, nunca quién gana.
  */
 export class SorteoComponent implements OnInit {
   configuracionLista: boolean = false;
@@ -141,6 +152,9 @@ export class SorteoComponent implements OnInit {
   
   profesorGanadorTemporalTesis: Profesor | null = null;
   alumnoGanadorTemporalTesis: Alumno | null = null;
+
+  /** Petición de guardado de la terna en curso: bloquea un doble envío. */
+  guardandoTesis: boolean = false;
 
   /**
    * @param asignacionService Acceso HTTP a asignaciones y catálogo de modalidades.
@@ -362,9 +376,10 @@ export class SorteoComponent implements OnInit {
             // Produce n! caminos de ejecución equiprobables, uno por permutación,
             // en tiempo O(n) y sin memoria adicional. El resultado es una
             // asignación de identificadores 1..n únicos y sin sesgo de orden.
+            // El índice j sale de Web Crypto: forma parte de la decisión oficial.
             let numerosDisponibles = Array.from({length: this.profesoresBaseNormal.length}, (_, i) => i + 1);
             for (let i = numerosDisponibles.length - 1; i > 0; i--) {
-                const j = Math.floor(Math.random() * (i + 1));
+                const j = obtenerEnteroAleatorio(0, i);
                 [numerosDisponibles[i], numerosDisponibles[j]] = [numerosDisponibles[j], numerosDisponibles[i]];
             }
             this.profesoresNormal = this.profesoresBaseNormal.map((p, index) => ({ ...p, id: numerosDisponibles[index] }));
@@ -520,6 +535,10 @@ export class SorteoComponent implements OnInit {
    * añaden entre 5 y 8 vueltas completas, que no alteran la posición final
    * (múltiplos de 360) pero producen el efecto visual de giro.
    *
+   * Uso deliberado de `Math.random()`: el número de vueltas es un detalle
+   * COSMÉTICO de la física de la ruleta. El ganador ya llega decidido en
+   * `indiceGanador` (Web Crypto) y ninguna vuelta extra puede cambiarlo.
+   *
    * @param rotacionActual Grados acumulados de la ruleta antes del giro.
    * @param totalElementos Número de porciones.
    * @param indiceGanador Índice ya sorteado que debe quedar bajo la aguja.
@@ -529,6 +548,7 @@ export class SorteoComponent implements OnInit {
     const angulo = 360 / totalElementos;
     const anguloCentroPorcion = (indiceGanador * angulo) + (angulo / 2);
     const modObjetivo = (360 - anguloCentroPorcion) % 360;
+    // Cosmético (ver JSDoc): solo varía cuántas vueltas se ven, no el resultado.
     const vueltasBase = (Math.floor(Math.random() * 4) + 5) * 360;
     let diferencia = modObjetivo - (rotacionActual % 360);
     if (diferencia < 0) diferencia += 360; 
@@ -553,10 +573,11 @@ export class SorteoComponent implements OnInit {
     if (!area) return;
     this.areaSeleccionada = area;
     this.profesoresNormal = [...this.profesoresBaseNormal];
-    // Fisher-Yates sobre la secuencia 1..n (ver explicación detallada en `leerExcel`).
+    // Fisher-Yates sobre la secuencia 1..n (ver explicación detallada en `leerExcel`),
+    // con el índice j obtenido de Web Crypto.
     let numerosDisponibles = Array.from({length: this.profesoresNormal.length}, (_, i) => i + 1);
     for (let i = numerosDisponibles.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
+        const j = obtenerEnteroAleatorio(0, i);
         [numerosDisponibles[i], numerosDisponibles[j]] = [numerosDisponibles[j], numerosDisponibles[i]];
     }
     this.profesoresNormal = this.profesoresNormal.map((p, index) => ({ ...p, id: numerosDisponibles[index] }));
@@ -608,9 +629,10 @@ export class SorteoComponent implements OnInit {
     this.catedraticoGanadorNormal = null; 
     this.alumnosAsignadosNormal = [];
 
-    // Math.random() ∈ [0, 1); al multiplicar por n y truncar se obtiene un
-    // entero en {0, …, n−1}, cada uno con probabilidad 1/n.
-    const indice = Math.floor(Math.random() * this.profesoresNormal.length);
+    // DECISIÓN OFICIAL: índice uniforme en {0, …, n−1} (probabilidad 1/n cada
+    // uno) desde Web Crypto con muestreo por rechazo. La animación posterior
+    // solo representa este resultado.
+    const indice = obtenerIndiceAleatorio(this.profesoresNormal.length);
     this.gradosRotacionNormalProfe = this.calcularRotacionExacta(this.gradosRotacionNormalProfe, this.profesoresNormal.length, indice);
     
     setTimeout(() => {
@@ -658,7 +680,8 @@ export class SorteoComponent implements OnInit {
     if (this.girandoNormalAlum || this.alumnosNormal.length === 0 || this.alumnosAsignadosNormal.length >= this.cupoActualNormal) return;
     this.girandoNormalAlum = true;
     
-    const indice = Math.floor(Math.random() * this.alumnosNormal.length);
+    // DECISIÓN OFICIAL (Web Crypto); la ruleta solo la representa.
+    const indice = obtenerIndiceAleatorio(this.alumnosNormal.length);
     this.gradosRotacionNormalAlum = this.calcularRotacionExacta(this.gradosRotacionNormalAlum, this.alumnosNormal.length, indice);
     
     setTimeout(() => {
@@ -790,7 +813,8 @@ export class SorteoComponent implements OnInit {
     
     this.girandoTesisProfe = true;
     
-    const indice = Math.floor(Math.random() * this.profesoresTesis.length);
+    // DECISIÓN OFICIAL (Web Crypto); la ruleta solo la representa.
+    const indice = obtenerIndiceAleatorio(this.profesoresTesis.length);
     this.gradosRotacionTesisProfe = this.calcularRotacionExacta(this.gradosRotacionTesisProfe, this.profesoresTesis.length, indice);
 
     setTimeout(() => {
@@ -848,7 +872,8 @@ export class SorteoComponent implements OnInit {
     if (this.girandoTesisAlum || this.alumnosTesisAsignados.length >= this.cupoActualTesis || this.alumnosTesis.length === 0) return;
     
     this.girandoTesisAlum = true;
-    const indice = Math.floor(Math.random() * this.alumnosTesis.length);
+    // DECISIÓN OFICIAL (Web Crypto); la ruleta solo la representa.
+    const indice = obtenerIndiceAleatorio(this.alumnosTesis.length);
     this.gradosRotacionTesisAlum = this.calcularRotacionExacta(this.gradosRotacionTesisAlum, this.alumnosTesis.length, indice);
 
     setTimeout(() => {
@@ -884,22 +909,25 @@ export class SorteoComponent implements OnInit {
   }
 
   /**
-   * Persiste la terna de tesis con su grupo de alumnos.
+   * Persiste de forma ATÓMICA la terna de tesis con todo su grupo de alumnos.
    *
    * @description
-   *  1. Retira de las ruletas a los últimos ganadores retenidos (catedrático y alumno).
-   *  2. Emite una petición POST por alumno; cada una registra en el backend las
-   *     tres filas del jurado dentro de su propia transacción.
-   *  3. Las peticiones se lanzan en paralelo y un contador (`guardados`) detecta
-   *     cuándo han respondido todas, con éxito o con error.
-   *  4. Si la última respuesta en llegar es un éxito, se consume un sobrante y
-   *     se reinicia el jurado para conformar la siguiente terna.
-   * Nota: la atomicidad es por alumno, no por terna completa; ante un fallo
-   * parcial se remite al usuario al módulo de reportes para verificar.
+   *  1. Retira de las ruletas a los últimos ganadores retenidos (catedrático y
+   *     alumno): ya forman parte de la terna en curso y no deben volver a salir.
+   *  2. Envía UNA sola petición (POST /asignaciones/terna) con el jurado y todos
+   *     los alumnos. El backend los inserta en una única transacción MariaDB con
+   *     un único `lote_id`: se guarda la terna entera o no se guarda nada.
+   *  3. Éxito: se confirma al usuario, se consume un sobrante y se reinicia el
+   *     jurado para conformar la siguiente terna.
+   *  4. Error (red, 4xx o 5xx): se informa que no se guardaron cambios y el
+   *     estado local NO avanza; la terna sigue lista para reintentar el guardado.
+   * La bandera `guardandoTesis` impide un doble envío mientras la petición está
+   * en curso, que registraría la misma terna dos veces.
    */
   guardarTesisOficial() {
+    if (this.guardandoTesis) return;
     if (this.alumnosTesisAsignados.length === 0 || this.catedraticosTesisAsignados.length < 3) return;
-    
+
     if (this.profesorGanadorTemporalTesis) {
       const idx = this.profesoresTesis.findIndex(p => p.id === this.profesorGanadorTemporalTesis!.id);
       if (idx !== -1) this.profesoresTesis.splice(idx, 1);
@@ -912,28 +940,34 @@ export class SorteoComponent implements OnInit {
       this.alumnoGanadorTemporalTesis = null;
     }
 
-    let guardados = 0;
-    const totalAGuardar = this.alumnosTesisAsignados.length;
+    this.guardandoTesis = true;
 
-    this.alumnosTesisAsignados.forEach(alu => {
-      this.asignacionService.guardarTesis(alu, this.catedraticosTesisAsignados, this.eventoSeleccionado.id).subscribe({
+    this.asignacionService
+      .guardarTernaTesis(this.catedraticosTesisAsignados, this.alumnosTesisAsignados, this.eventoSeleccionado.id)
+      .subscribe({
         next: () => {
-          guardados++;
-          if (guardados === totalAGuardar) {
-            Swal.fire('¡Guardado!', 'El jurado y su grupo de alumnos han sido registrados correctamente.', 'success');
-            if (this.sobrantesTesis > 0) this.sobrantesTesis--;
-            this.alumnosTesisAsignados = []; 
-            this.catedraticosTesisAsignados = []; 
-            this.calcularMatematicaTesis(); 
-            if (this.alumnosTesis.length === 0) { Swal.fire('¡Finalizado!', 'Todos los tesistas han sido asignados.', 'success'); }
-          }
+          this.guardandoTesis = false;
+          Swal.fire('¡Guardado!', 'El jurado y su grupo de alumnos han sido registrados correctamente.', 'success');
+          if (this.sobrantesTesis > 0) this.sobrantesTesis--;
+          this.alumnosTesisAsignados = [];
+          this.catedraticosTesisAsignados = [];
+          this.calcularMatematicaTesis();
+          if (this.alumnosTesis.length === 0) { Swal.fire('¡Finalizado!', 'Todos los tesistas han sido asignados.', 'success'); }
+          this.cdr.detectChanges();
         },
-        error: () => {
-          guardados++;
-          if (guardados === totalAGuardar) { Swal.fire('¡Aviso!', 'Se completó el proceso, revisa el reporte.', 'info'); }
+        error: (err) => {
+          // La transacción del backend se revirtió (o la petición ni llegó):
+          // no existe ninguna fila de esta terna. No se toca el estado del
+          // sorteo para que el usuario pueda reintentar con la misma terna.
+          this.guardandoTesis = false;
+          Swal.fire(
+            'No se pudo confirmar la terna',
+            `No se pudo confirmar la terna, no se guardaron cambios. ${mensajeParaUsuario(interpretarError(err))}`,
+            'error'
+          );
+          this.cdr.detectChanges();
         }
       });
-    });
   }
 
   /**
