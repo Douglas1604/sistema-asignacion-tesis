@@ -924,12 +924,16 @@ export class SorteoComponent implements OnInit {
    * La bandera `guardandoTesis` impide un doble envío mientras la petición está
    * en curso, que registraría la misma terna dos veces.
    */
- guardarTesisOficial() {
+guardarTesisOficial() {
     this.alumnoGanadorTemporalTesis = null;
     this.guardandoTesis = true;
 
-    (this.asignacionService as any)
-      .guardarTerna(this.eventoSeleccionado.id, this.alumnosTesisAsignados, this.catedraticosTesisAsignados)
+    this.asignacionService
+      .guardarTernaTesis(
+        this.catedraticosTesisAsignados,
+        this.alumnosTesisAsignados,
+        this.eventoSeleccionado.id
+      )
       .subscribe({
         next: () => {
           this.guardandoTesis = false;
@@ -952,7 +956,6 @@ export class SorteoComponent implements OnInit {
         }
       });
   }
-
   /**
    * Cierra la sesión: borra el token y la identidad guardados en el navegador
    * y devuelve al login. Antes el enlace solo navegaba, dejando la sesión viva.
