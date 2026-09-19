@@ -58,7 +58,7 @@ const AsignacionesService = {
    *
    * @param {object} payload Cuerpo ya validado por el esquema de entrada.
    * @param {{usuarioId?: number, ip?: string, requestId?: string}} [contexto] Datos de auditoría.
-   * @returns {Promise<{registros: number, tipo_evento_id: number, modo: string}>}
+   * @returns {Promise<{lote_id: string, registros: number, tipo_evento_id: number, modo: string}>}
    * @throws {AppError} 422 si faltan precondiciones del sorteo.
    */
   async registrar(payload, contexto = {}) {
@@ -66,6 +66,31 @@ const AsignacionesService = {
     const tipoEventoId = resolverTipoEvento(payload.tipo_evento_id, esTesis);
 
     await asegurarModalidadValida(tipoEventoId);
+
+    // Cada llamada a `registrar` es, en principio, un guardado independiente:
+    // un UUID propio evita que dos sorteos hechos en el mismo instante (o
+    // minuto) compartan identificador y terminen mezclados al listar o
+    // borrar por lote. En tesis, el cliente puede reenviar el `lote_id` que
+    // devolvió un guardado anterior para adjuntar otro alumno a esa misma
+    // sesión de jurado, en lugar de abrir un lote propio.
+    let loteId = payload.lote_id;
+    if (loteId) {
+      const tipoEventoDelLote = await AsignacionesRepository.obtenerTipoEventoDeLote(
+        loteId
+      );
+      if (tipoEventoDelLote === null) {
+        throw AppError.unprocessable(
+          "El lote_id indicado no corresponde a ningún guardado existente"
+        );
+      }
+      if (tipoEventoDelLote !== tipoEventoId) {
+        throw AppError.unprocessable(
+          "El lote_id indicado pertenece a otra modalidad"
+        );
+      }
+    } else {
+      loteId = crypto.randomUUID();
+    }
 
     let registros;
     let modo;
@@ -78,6 +103,7 @@ const AsignacionesService = {
       }
       modo = "tesis";
       registros = await AsignacionesRepository.crearAsignacionesTesis({
+        loteId,
         alumno: payload.alumno,
         profesores: payload.profesores,
         tipoEventoId,
@@ -90,6 +116,7 @@ const AsignacionesService = {
       }
       modo = "terna";
       registros = await AsignacionesRepository.crearAsignacionesTerna({
+        loteId,
         profesorNombre: payload.profesor_nombre,
         alumnos: payload.alumnos,
         tipoEventoId,
@@ -99,11 +126,11 @@ const AsignacionesService = {
     logger.auditoria({
       accion: "ASIGNACIONES_CREADAS",
       recurso: "asignaciones",
-      detalles: { modo, tipo_evento_id: tipoEventoId, registros },
+      detalles: { lote_id: loteId, modo, tipo_evento_id: tipoEventoId, registros },
       ...contexto,
     });
 
-    return { registros, tipo_evento_id: tipoEventoId, modo };
+    return { lote_id: loteId, registros, tipo_evento_id: tipoEventoId, modo };
   },
 
   /**
@@ -187,29 +214,29 @@ const AsignacionesService = {
 
   /**
    * Elimina las asignaciones de un alumno dentro de un lote concreto.
-   * @param {{carnet: string, fecha: string}} datos Identificadores del registro.
+   * @param {{lote_id: string, carnet: string}} datos Identificadores del registro.
    * @param {{usuarioId?: number, ip?: string, requestId?: string}} [contexto] Datos de auditoría.
    * @returns {Promise<{eliminados: number}>}
    * @throws {AppError} 404 si no existe esa asignación.
    */
-  async eliminarAsignacionAlumno({ carnet, fecha }, contexto = {}) {
-    const existentes = await AsignacionesRepository.contarPorAlumnoYFecha(
-      carnet,
-      fecha
+  async eliminarAsignacionAlumno({ lote_id: loteId, carnet }, contexto = {}) {
+    const existentes = await AsignacionesRepository.contarPorLoteYAlumno(
+      loteId,
+      carnet
     );
     if (existentes === 0) {
-      throw AppError.notFound("No existe ninguna asignación para ese alumno y fecha");
+      throw AppError.notFound("No existe ninguna asignación para ese alumno en ese lote");
     }
 
-    const eliminados = await AsignacionesRepository.eliminarPorAlumnoYFecha(
-      carnet,
-      fecha
+    const eliminados = await AsignacionesRepository.eliminarPorLoteYAlumno(
+      loteId,
+      carnet
     );
 
     logger.auditoria({
       accion: "ASIGNACION_ALUMNO_ELIMINADA",
       recurso: "asignaciones",
-      detalles: { carnet, fecha, eliminados },
+      detalles: { lote_id: loteId, carnet, eliminados },
       ...contexto,
     });
 
@@ -217,24 +244,24 @@ const AsignacionesService = {
   },
 
   /**
-   * Elimina un lote completo de asignaciones identificado por su marca de tiempo.
-   * @param {string} fecha Marca en formato dd/mm/aaaa hh:mm.
+   * Elimina un lote completo de asignaciones identificado por su `lote_id`.
+   * @param {string} loteId Identificador UUID del lote.
    * @param {{usuarioId?: number, ip?: string, requestId?: string}} [contexto] Datos de auditoría.
    * @returns {Promise<{eliminados: number}>}
-   * @throws {AppError} 404 si no hay ningún registro con esa marca.
+   * @throws {AppError} 404 si no hay ningún registro con ese lote_id.
    */
-  async eliminarLote(fecha, contexto = {}) {
-    const existentes = await AsignacionesRepository.contarPorFechaLote(fecha);
+  async eliminarLote(loteId, contexto = {}) {
+    const existentes = await AsignacionesRepository.contarPorLote(loteId);
     if (existentes === 0) {
-      throw AppError.notFound("No existe ningún lote de sorteo con esa fecha");
+      throw AppError.notFound("No existe ningún lote de sorteo con ese identificador");
     }
 
-    const eliminados = await AsignacionesRepository.eliminarLotePorFecha(fecha);
+    const eliminados = await AsignacionesRepository.eliminarLote(loteId);
 
     logger.auditoria({
       accion: "ASIGNACIONES_LOTE_ELIMINADO",
       recurso: "asignaciones",
-      detalles: { fecha, eliminados },
+      detalles: { lote_id: loteId, eliminados },
       ...contexto,
     });
 

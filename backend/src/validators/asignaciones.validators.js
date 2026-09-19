@@ -30,7 +30,17 @@ const profesorSchema = z.object({
 /** Modalidad del evento. */
 const tipoEventoIdSchema = z.coerce.number().int().positive();
 
-/** Registro de un jurado de tesis. */
+/** Identificador de lote: UUID generado por el servicio al guardar. */
+const loteIdSchema = z.uuid("El lote_id debe ser un UUID válido");
+
+/**
+ * Registro de un jurado de tesis.
+ *
+ * `lote_id` es opcional: si se omite, el servicio crea un lote nuevo; si se
+ * envía (el mismo que devolvió un guardado anterior), el alumno se adjunta a
+ * ese lote en vez de abrir uno propio. Así el sorteo agrupa a varios
+ * tesistas sorteados en la misma sesión bajo un único lote.
+ */
 const asignacionTesisSchema = z
   .object({
     es_tesis: z.literal(true),
@@ -42,6 +52,7 @@ const asignacionTesisSchema = z
         "Un jurado de tesis requiere exactamente 3 catedráticos"
       ),
     tipo_evento_id: tipoEventoIdSchema.optional(),
+    lote_id: loteIdSchema.optional(),
   })
   .strict();
 
@@ -67,7 +78,11 @@ const crearAsignacionSchema = z.discriminatedUnion("es_tesis", [
   asignacionTernaSchema,
 ]);
 
-/** Registro de una terna de tesis atómica (POST /asignaciones/terna). */
+/**
+ * Registro de una terna de tesis atómica (POST /asignaciones/terna).
+ * El `superRefine` rechaza carnets repetidos dentro de la misma terna: sin
+ * esto, el mismo alumno podría recibir dos filas en el lote.
+ */
 const crearTernaTesisSchema = z
   .object({
     profesores: z
@@ -85,32 +100,32 @@ const crearTernaTesisSchema = z
       ),
     tipo_evento_id: tipoEventoIdSchema.optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((datos, ctx) => {
+    const carnetsVistos = new Set();
+    datos.alumnos.forEach((alumno, indice) => {
+      if (carnetsVistos.has(alumno.carnet)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["alumnos", indice, "carnet"],
+          message: "El carnet está repetido dentro de la misma terna",
+        });
+      } else {
+        carnetsVistos.add(alumno.carnet);
+      }
+    });
+  });
 
-const FORMATO_FECHA_LOTE = /^\d{2}\/\d{2}\/\d{4} \d{2}:\d{2}$/;
-
-const eliminarLoteQuerySchema = z
+const eliminarLoteParamsSchema = z
   .object({
-    fecha: z
-      .string()
-      .trim()
-      .regex(
-        FORMATO_FECHA_LOTE,
-        "La fecha del lote debe tener el formato dd/mm/aaaa hh:mm"
-      ),
+    lote_id: loteIdSchema,
   })
   .strict();
 
 const eliminarAsignacionAlumnoParamsSchema = z
   .object({
+    lote_id: loteIdSchema,
     carnet: textoRequerido(MAX_CARNET, "El carnet"),
-    fecha: z
-      .string()
-      .trim()
-      .regex(
-        FORMATO_FECHA_LOTE,
-        "La fecha debe tener el formato dd/mm/aaaa hh:mm"
-      ),
   })
   .strict();
 
@@ -121,7 +136,7 @@ const listarAsignacionesQuerySchema = paginacionQuery.extend({
 module.exports = {
   crearAsignacionSchema,
   crearTernaTesisSchema,
-  eliminarLoteQuerySchema,
+  eliminarLoteParamsSchema,
   eliminarAsignacionAlumnoParamsSchema,
   listarAsignacionesQuerySchema,
 };

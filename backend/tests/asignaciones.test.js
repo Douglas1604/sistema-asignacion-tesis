@@ -11,8 +11,70 @@ const assert = require("node:assert/strict");
 const request = require("supertest");
 
 const { app, instalarDobles, obtenerToken } = require("./helpers/entorno");
+const AsignacionesRepository = require("../src/repositories/asignaciones.repository");
 
-test.before(instalarDobles);
+/** UUID con formato válido que nunca se inserta: sirve para los casos "no existe". */
+const LOTE_ID_INEXISTENTE = "00000000-0000-4000-8000-000000000000";
+
+/** Tabla `asignaciones` simulada, igual que en tests/lotes.test.js. */
+let tabla = [];
+
+/**
+ * Sustituye las operaciones de creación/borrado por lote por una tabla en
+ * memoria, para poder crear un registro real y luego borrarlo por su
+ * `lote_id` (el identificador ya no es una fecha, ver issue #1).
+ */
+function instalarTablaDeAsignaciones() {
+  const insertar = (loteId, carnet, tipoEventoId) =>
+    tabla.push({ lote_id: loteId, alumno_carnet: carnet, tipo_evento_id: tipoEventoId });
+
+  AsignacionesRepository.crearAsignacionesTesis = async ({
+    loteId,
+    alumno,
+    profesores,
+    tipoEventoId,
+  }) => {
+    profesores.forEach(() => insertar(loteId, alumno.carnet, tipoEventoId));
+    return profesores.length;
+  };
+
+  AsignacionesRepository.crearAsignacionesTerna = async ({
+    loteId,
+    alumnos,
+    tipoEventoId,
+  }) => {
+    alumnos.forEach((alumno) => insertar(loteId, alumno.carnet, tipoEventoId));
+    return alumnos.length;
+  };
+
+  AsignacionesRepository.obtenerTipoEventoDeLote = async (loteId) => {
+    const fila = tabla.find((f) => f.lote_id === loteId);
+    return fila ? fila.tipo_evento_id : null;
+  };
+
+  AsignacionesRepository.contarPorLote = async (loteId) =>
+    tabla.filter((f) => f.lote_id === loteId).length;
+
+  AsignacionesRepository.eliminarLote = async (loteId) => {
+    const antes = tabla.length;
+    tabla = tabla.filter((f) => f.lote_id !== loteId);
+    return antes - tabla.length;
+  };
+
+  AsignacionesRepository.contarPorLoteYAlumno = async (loteId, carnet) =>
+    tabla.filter((f) => f.lote_id === loteId && f.alumno_carnet === carnet).length;
+
+  AsignacionesRepository.eliminarPorLoteYAlumno = async (loteId, carnet) => {
+    const antes = tabla.length;
+    tabla = tabla.filter((f) => !(f.lote_id === loteId && f.alumno_carnet === carnet));
+    return antes - tabla.length;
+  };
+}
+
+test.before(async () => {
+  await instalarDobles();
+  instalarTablaDeAsignaciones();
+});
 
 test("registra una terna de privado o seminario", async () => {
   const peticion = request(app());
@@ -137,13 +199,23 @@ test("elimina un lote existente", async () => {
   const peticion = request(app());
   const token = await obtenerToken(peticion);
 
+  const creado = await request(app())
+    .post("/api/v1/asignaciones")
+    .set("Authorization", `Bearer ${token}`)
+    .send({
+      es_tesis: false,
+      profesor_nombre: "Terna a borrar",
+      alumnos: [{ carnet: "9999-1", nombre_completo: "Uno" }],
+      tipo_evento_id: 1,
+    });
+  const loteId = creado.body.data.lote_id;
+
   const respuesta = await request(app())
-    .delete("/api/v1/asignaciones/lote")
-    .query({ fecha: "12/09/2026 10:30" })
+    .delete(`/api/v1/asignaciones/lote/${loteId}`)
     .set("Authorization", `Bearer ${token}`);
 
   assert.equal(respuesta.status, 200);
-  assert.equal(respuesta.body.data.eliminados, 3);
+  assert.equal(respuesta.body.data.eliminados, 1);
 });
 
 test("borrar un lote inexistente responde 404", async () => {
@@ -151,8 +223,7 @@ test("borrar un lote inexistente responde 404", async () => {
   const token = await obtenerToken(peticion);
 
   const respuesta = await request(app())
-    .delete("/api/v1/asignaciones/lote")
-    .query({ fecha: "01/01/2000 00:00" })
+    .delete(`/api/v1/asignaciones/lote/${LOTE_ID_INEXISTENTE}`)
     .set("Authorization", `Bearer ${token}`);
 
   assert.equal(respuesta.status, 404);
@@ -184,10 +255,23 @@ test("elimina la asignación de un alumno dentro de un lote", async () => {
   const peticion = request(app());
   const token = await obtenerToken(peticion);
 
+  const creado = await request(app())
+    .post("/api/v1/asignaciones")
+    .set("Authorization", `Bearer ${token}`)
+    .send({
+      es_tesis: true,
+      alumno: { carnet: "1990-12-3456", nombre_completo: "Ana López" },
+      profesores: [
+        { nombre_completo: "Ing. A" },
+        { nombre_completo: "Ing. B" },
+        { nombre_completo: "Ing. C" },
+      ],
+      tipo_evento_id: 3,
+    });
+  const loteId = creado.body.data.lote_id;
+
   const respuesta = await request(app())
-    .delete(
-      `/api/v1/asignaciones/alumno/1990-12-3456/${encodeURIComponent("12/09/2026 10:30")}`
-    )
+    .delete(`/api/v1/asignaciones/lote/${loteId}/alumno/1990-12-3456`)
     .set("Authorization", `Bearer ${token}`);
 
   assert.equal(respuesta.status, 200);
@@ -199,9 +283,7 @@ test("borrar la asignación de un alumno inexistente responde 404", async () => 
   const token = await obtenerToken(peticion);
 
   const respuesta = await request(app())
-    .delete(
-      `/api/v1/asignaciones/alumno/0000-00-0000/${encodeURIComponent("12/09/2026 10:30")}`
-    )
+    .delete(`/api/v1/asignaciones/lote/${LOTE_ID_INEXISTENTE}/alumno/0000-00-0000`)
     .set("Authorization", `Bearer ${token}`);
 
   assert.equal(respuesta.status, 404);
@@ -209,7 +291,7 @@ test("borrar la asignación de un alumno inexistente responde 404", async () => 
 
 test("borrar la asignación de un alumno exige autenticación", async () => {
   const respuesta = await request(app()).delete(
-    `/api/v1/asignaciones/alumno/1990-12-3456/${encodeURIComponent("12/09/2026 10:30")}`
+    `/api/v1/asignaciones/lote/${LOTE_ID_INEXISTENTE}/alumno/1990-12-3456`
   );
 
   assert.equal(respuesta.status, 401);
