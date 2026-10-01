@@ -58,13 +58,31 @@ describe('LoginComponent', () => {
     expect(component).toBeTruthy();
   });
 
-  it('exige correo y contraseña antes de llamar al servidor', () => {
+  it('exige identificador y contraseña antes de llamar al servidor', () => {
     component.email = '';
     component.password = '';
     component.onLogin();
 
-    expect(component.errorMessage).toContain('correo y contraseña');
+    expect(component.errorMessage).toContain('contraseña');
     httpMock.expectNone(`${environment.apiUrl}/auth/login`);
+  });
+
+  it('acepta el nombre de usuario y no le aplica la regla de dominio', () => {
+    // La cuenta administradora se identifica como "admin"; exigirle un dominio
+    // institucional la dejaba fuera sin llegar a consultar al servidor.
+    const router = TestBed.inject(Router);
+    const navegar = vi.spyOn(router, 'navigateByUrl').mockResolvedValue(true);
+
+    component.email = 'admin';
+    component.password = 'secreta';
+    component.onLogin();
+
+    const peticion = httpMock.expectOne(`${environment.apiUrl}/auth/login`);
+    expect(peticion.request.body.email).toBe('admin');
+    peticion.flush(RESPUESTA_OK);
+
+    expect(navegar).toHaveBeenCalledWith('/dashboard');
+    expect(component.errorMessage).toBe('');
   });
 
   it('avisa si el correo no es institucional y no gasta una petición', () => {
@@ -113,7 +131,7 @@ describe('LoginComponent', () => {
       { status: 401, statusText: 'Unauthorized' },
     );
 
-    expect(component.errorMessage).toBe('Correo o contraseña incorrectos');
+    expect(component.errorMessage).toBe('Usuario o contraseña incorrectos');
     expect(component.cargando).toBe(false);
     expect(component.password).toBe('');
   });

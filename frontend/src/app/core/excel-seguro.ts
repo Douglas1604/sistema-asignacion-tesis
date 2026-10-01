@@ -208,29 +208,172 @@ function acotarHoja(datos: unknown[][]): { filas: unknown[][]; truncado: boolean
   return { filas, truncado };
 }
 
+/** Palabras clave que delatan una fila de encabezado. */
+const PALABRAS_ENCABEZADO = [
+  'nombre',
+  'carnet',
+  'catedratico',
+  'catedrático',
+  'docente',
+  'alumno',
+  'estudiante',
+  'area',
+  'área',
+  'registro',
+  'carne',
+];
+
 /**
- * Detecta y elimina la fila de encabezado, si la hay.
- * @param filas Filas ya acotadas.
- * @returns Las filas sin el encabezado.
+ * Normaliza un título de columna para compararlo: recorta, pasa a minúsculas y
+ * elimina las tildes.
+ *
+ * El `trim()` es imprescindible: un encabezado escrito como `" Carnet "` (con
+ * espacios, como los genera la propia plantilla del sistema) no coincidiría
+ * con ninguna palabra clave si se comparase en crudo.
+ *
+ * @param valor Contenido de la celda de encabezado.
+ * @returns Texto comparable, posiblemente vacío.
  */
-function quitarEncabezado(filas: unknown[][]): unknown[][] {
-  // Detección heurística: se asume encabezado si la primera celda contiene
-  // alguna palabra clave típica de un título de columna. Así el sistema acepta
-  // tanto hojas con encabezado como listas pegadas directamente desde la fila 1.
-  if (filas.length === 0) return filas;
+function normalizarTitulo(valor: unknown): string {
+  if (typeof valor !== 'string' && typeof valor !== 'number') return '';
+  return String(valor)
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '');
+}
 
-  const primera = filas[0][0];
-  if (typeof primera !== 'string') return filas;
+/**
+ * Indica si un título de columna coincide con alguna palabra clave conocida.
+ * @param titulo Título ya normalizado.
+ */
+function pareceTituloDeColumna(titulo: string): boolean {
+  return PALABRAS_ENCABEZADO.some((palabra) => titulo.includes(normalizarTitulo(palabra)));
+}
 
-  const titulo = primera.toLowerCase();
-  const esEncabezado =
-    titulo.includes('nombre') ||
-    titulo.includes('carnet') ||
-    titulo.includes('catedratico') ||
-    titulo.includes('area') ||
-    titulo.includes('área');
+/**
+ * Indica si la fila recibida es un encabezado de columnas.
+ *
+ * @description Antes solo se miraba la PRIMERA celda: una hoja cuyo encabezado
+ * empezara por otra columna (p. ej. `Nombre | Carnet`) o que tuviera la
+ * primera celda vacía pasaba por fila de datos y el título acababa sorteado
+ * como si fuera un alumno.
+ *
+ * Ahora se miran todas, pero con dos condiciones que evitan el error opuesto
+ * (confundir un dato con un título):
+ *  - TODAS las celdas con contenido deben parecer títulos. Basta con que una
+ *    no lo parezca (un carnet, un nombre propio) para tratar la fila como
+ *    datos.
+ *  - Un encabezado de una sola columna solo se acepta si está en la primera
+ *    posición, como en la plantilla de catedráticos. Así una fila como
+ *    `['', 'Sin Carnet']` sigue siendo un dato incompleto que se descarta, y
+ *    no un encabezado que se ignora en silencio.
+ *
+ * @param fila Primera fila de la hoja.
+ * @returns true si la fila es un encabezado de columnas.
+ */
+function esFilaEncabezado(fila: unknown[]): boolean {
+  const conContenido: Array<{ titulo: string; indice: number }> = [];
 
-  return esEncabezado ? filas.slice(1) : filas;
+  fila.forEach((celda, indice) => {
+    const titulo = normalizarTitulo(celda);
+    if (titulo) conContenido.push({ titulo, indice });
+  });
+
+  if (conContenido.length === 0) return false;
+  if (!conContenido.every(({ titulo }) => pareceTituloDeColumna(titulo))) return false;
+
+  return conContenido.length > 1 || conContenido[0].indice === 0;
+}
+
+/** Posición de cada dato dentro de la fila. */
+interface MapaColumnas {
+  carnet: number;
+  nombre: number;
+}
+
+/**
+ * Deduce en qué columna está cada dato a partir del encabezado.
+ *
+ * @description Resuelve el caso de las columnas en orden distinto: si el
+ * encabezado dice `Nombre | Carnet`, el carnet se lee de la columna 1 y el
+ * nombre de la 0. Sin esto, la lista entera quedaba invertida (nombres en el
+ * campo del carnet) y el acta salía ilegible.
+ *
+ * Cuando la hoja no trae encabezado, o sus títulos no se reconocen, se
+ * conserva el orden histórico: carnet en la primera columna, nombre en la
+ * segunda.
+ *
+ * @param encabezado Fila de títulos, o null si la hoja no la tiene.
+ * @returns Índices de columna a usar.
+ */
+function deducirColumnasAlumno(encabezado: unknown[] | null): MapaColumnas {
+  const mapa: MapaColumnas = { carnet: 0, nombre: 1 };
+  if (!encabezado) return mapa;
+
+  let carnet = -1;
+  let nombre = -1;
+
+  encabezado.forEach((celda, indice) => {
+    const titulo = normalizarTitulo(celda);
+    if (!titulo) return;
+
+    // "carne" cubre también "carné" una vez quitadas las tildes.
+    if (carnet === -1 && (titulo.includes('carnet') || titulo.includes('carne') || titulo.includes('registro'))) {
+      carnet = indice;
+      return;
+    }
+    if (nombre === -1 && (titulo.includes('nombre') || titulo.includes('alumno') || titulo.includes('estudiante'))) {
+      nombre = indice;
+    }
+  });
+
+  if (carnet !== -1) mapa.carnet = carnet;
+  if (nombre !== -1) mapa.nombre = nombre;
+
+  // Si ambos títulos apuntasen a la misma columna, el nombre se toma de la
+  // siguiente para no duplicar el mismo valor en los dos campos.
+  if (mapa.carnet === mapa.nombre) mapa.nombre = mapa.carnet + 1;
+
+  return mapa;
+}
+
+/**
+ * Deduce en qué columna está el nombre del catedrático.
+ * @param encabezado Fila de títulos, o null si la hoja no la tiene.
+ * @returns Índice de la columna del nombre.
+ */
+function deducirColumnaProfesor(encabezado: unknown[] | null): number {
+  if (!encabezado) return 0;
+
+  const indice = encabezado.findIndex((celda) => {
+    const titulo = normalizarTitulo(celda);
+    return (
+      Boolean(titulo) &&
+      (titulo.includes('nombre') || titulo.includes('catedratico') || titulo.includes('docente'))
+    );
+  });
+
+  return indice === -1 ? 0 : indice;
+}
+
+/**
+ * Separa el encabezado (si existe) del cuerpo de datos.
+ *
+ * @param filas Filas ya acotadas.
+ * @returns Encabezado detectado y filas de datos.
+ */
+function separarEncabezado(filas: unknown[][]): {
+  encabezado: unknown[] | null;
+  datos: unknown[][];
+} {
+  if (filas.length === 0) return { encabezado: null, datos: filas };
+
+  if (esFilaEncabezado(filas[0])) {
+    return { encabezado: filas[0], datos: filas.slice(1) };
+  }
+
+  return { encabezado: null, datos: filas };
 }
 
 /**
@@ -242,19 +385,37 @@ function quitarEncabezado(filas: unknown[][]): unknown[][] {
  */
 export function extraerProfesores(datos: unknown[][]): ResultadoFilas<ProfesorExcel> {
   const { filas, truncado } = acotarHoja(datos);
-  const sinEncabezado = quitarEncabezado(filas);
+  const { encabezado, datos: cuerpo } = separarEncabezado(filas);
+  const columnaNombre = deducirColumnaProfesor(encabezado);
 
   const validas: ProfesorExcel[] = [];
+  const nombresVistos = new Set<string>();
   let descartadas = 0;
 
-  for (const fila of sinEncabezado) {
-    const nombre = normalizarCelda(fila[0], MAX_LONGITUD_NOMBRE);
+  for (const fila of cuerpo) {
+    // Se prueba primero la columna deducida del encabezado y, si esa celda
+    // está vacía, la primera columna con contenido: así una hoja con una
+    // columna de numeración a la izquierda tampoco se pierde.
+    let nombre = normalizarCelda(fila[columnaNombre], MAX_LONGITUD_NOMBRE);
+    if (!nombre) {
+      const alternativa = fila.find((celda) => normalizarCelda(celda, MAX_LONGITUD_NOMBRE) !== '');
+      nombre = normalizarCelda(alternativa, MAX_LONGITUD_NOMBRE);
+    }
 
     // Una fila sin nombre no representa a nadie: se descarta y se informa.
     if (!nombre) {
       descartadas++;
       continue;
     }
+
+    // Un catedrático repetido en la hoja aparecería dos veces en la ruleta y
+    // podría integrar dos jurados distintos. Se conserva la primera aparición.
+    const clave = nombre.toLowerCase();
+    if (nombresVistos.has(clave)) {
+      descartadas++;
+      continue;
+    }
+    nombresVistos.add(clave);
 
     // El `id` se deriva de las filas VÁLIDAS (no del número de fila del Excel),
     // lo que garantiza una secuencia 1..n contigua y sin huecos ni duplicados.
@@ -277,13 +438,15 @@ export function extraerProfesores(datos: unknown[][]): ResultadoFilas<ProfesorEx
  */
 export function extraerAlumnos(datos: unknown[][]): ResultadoFilas<AlumnoExcel> {
   const { filas, truncado } = acotarHoja(datos);
-  const sinEncabezado = quitarEncabezado(filas);
+  const { encabezado, datos: cuerpo } = separarEncabezado(filas);
+  const columnas = deducirColumnasAlumno(encabezado);
 
   const validas: AlumnoExcel[] = [];
+  const carnetsVistos = new Set<string>();
   let descartadas = 0;
 
-  for (const fila of sinEncabezado) {
-    const carnet = normalizarCelda(fila[0], MAX_LONGITUD_CARNET);
+  for (const fila of cuerpo) {
+    const carnet = normalizarCelda(fila[columnas.carnet], MAX_LONGITUD_CARNET);
 
     // El carnet es el identificador del alumno: sin él la fila no sirve.
     if (!carnet) {
@@ -291,8 +454,18 @@ export function extraerAlumnos(datos: unknown[][]): ResultadoFilas<AlumnoExcel> 
       continue;
     }
 
+    // Un carnet repetido sacaría al mismo alumno dos veces en la ruleta y, al
+    // guardar una terna de tesis, el backend rechazaría el lote completo con
+    // un 422 por carnet duplicado. Se conserva la primera aparición.
+    const clave = carnet.toLowerCase();
+    if (carnetsVistos.has(clave)) {
+      descartadas++;
+      continue;
+    }
+    carnetsVistos.add(clave);
+
     // El nombre sí admite un valor por defecto, como en la versión anterior.
-    const nombre = normalizarCelda(fila[1], MAX_LONGITUD_NOMBRE) || 'Desconocido';
+    const nombre = normalizarCelda(fila[columnas.nombre], MAX_LONGITUD_NOMBRE) || 'Desconocido';
 
     validas.push({
       id: validas.length + 1,

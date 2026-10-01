@@ -25,7 +25,7 @@ let sentencias = [];
 test.before(() => {
   const registrar = async (sql, params) => {
     sentencias.push({ sql, params });
-    if (/^\s*DELETE/i.test(sql)) return [{ affectedRows: 2 }];
+    if (/^\s*(DELETE|UPDATE)/i.test(sql)) return [{ affectedRows: 2 }];
     if (/COUNT\(\*\)/i.test(sql)) return [[{ total: 2 }]];
     if (/SELECT\s+tipo_evento_id/i.test(sql)) return [[]];
     return [[]];
@@ -123,8 +123,34 @@ test("borrar y contar un lote filtran por lote_id, no por la fecha", async () =>
 
   assert.equal(sentencias.length, 4);
   for (const { sql, params } of sentencias) {
-    assert.match(sql, /WHERE lote_id = \?/);
+    // El alias `a.` es opcional: lo que importa es que el criterio sea el
+    // lote y nunca la fecha truncada al minuto.
+    assert.match(sql, /WHERE\s+(a\.)?lote_id = \?/);
     assert.doesNotMatch(sql, /DATE_FORMAT/);
+    assert.equal(params[0], loteId);
+  }
+});
+
+test("con la columna `active` disponible, borrar un lote es lógico y no un DELETE", async () => {
+  const estadoEsquema = require("../src/config/schema-state");
+  const loteId = "44444444-4444-4444-8444-444444444444";
+
+  estadoEsquema.asignacionesActive = true;
+  try {
+    await AsignacionesRepository.eliminarLote(loteId);
+    await AsignacionesRepository.eliminarPorLoteYAlumno(loteId, "1990-1");
+  } finally {
+    // La bandera es global al proceso: se restaura para no contaminar el resto.
+    estadoEsquema.asignacionesActive = false;
+  }
+
+  assert.equal(sentencias.length, 2);
+  for (const { sql, params } of sentencias) {
+    // Un DELETE sobre filas referenciadas lo rechazaría MariaDB por clave
+    // foránea; el UPDATE deja el acta anulada pero rastreable.
+    assert.doesNotMatch(sql, /DELETE/i);
+    assert.match(sql, /UPDATE asignaciones/i);
+    assert.match(sql, /SET a\.active = 0/);
     assert.equal(params[0], loteId);
   }
 });

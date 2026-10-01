@@ -13,6 +13,7 @@
  */
 
 const { pool } = require("../config/db");
+const estadoEsquema = require("../config/schema-state");
 
 // Nota sobre inyección SQL, aplicable a todo el módulo: ningún valor recibido
 // se concatena en el texto de la sentencia. Cada `?` se sustituye por el driver
@@ -24,6 +25,24 @@ const ROLES_TESIS = ["Presidente", "Vocal 1", "Vocal 2"];
 
 /** Nombre por defecto cuando el sorteo no aporta uno, igual que en la versión previa. */
 const CATEDRATICO_POR_DEFECTO = "Catedrático";
+
+/**
+ * Fragmento que restringe la consulta a las filas vigentes.
+ *
+ * El borrado de actas es LÓGICO: `active = 0` marca un lote anulado en vez de
+ * eliminarlo. Así el histórico sigue siendo auditable y ninguna fila
+ * dependiente se queda huérfana ni bloquea la sentencia por una restricción
+ * de clave foránea.
+ *
+ * La columna la añade el arranque (`config/bootstrap.js`); si la base todavía
+ * no la tiene, el filtro se omite y el módulo sigue funcionando como antes.
+ *
+ * @param {string} [alias] Alias de la tabla en la consulta.
+ * @returns {string} Cláusula a concatenar, o cadena vacía.
+ */
+function filtroVigentes(alias = "a") {
+  return estadoEsquema.asignacionesActive ? `AND ${alias}.active = 1` : "";
+}
 
 /** Sentencia de inserción común a ambas modalidades. */
 const SQL_INSERTAR_ASIGNACION = `
@@ -200,6 +219,8 @@ const AsignacionesRepository = {
         DATE_FORMAT(a.fecha_asignacion, '%d/%m/%Y %H:%i') AS fecha
       FROM asignaciones a
       LEFT JOIN tipos_evento te ON a.tipo_evento_id = te.id
+      WHERE 1 = 1
+        ${filtroVigentes()}
       ORDER BY a.fecha_asignacion DESC, a.id DESC
       LIMIT ? OFFSET ?
     `;
@@ -212,7 +233,12 @@ const AsignacionesRepository = {
    * @returns {Promise<number>}
    */
   async contar() {
-    const [filas] = await pool.query("SELECT COUNT(*) AS total FROM asignaciones");
+    const [filas] = await pool.query(
+      `SELECT COUNT(*) AS total
+         FROM asignaciones a
+        WHERE 1 = 1
+          ${filtroVigentes()}`
+    );
     return Number(filas[0].total);
   },
 
@@ -225,9 +251,10 @@ const AsignacionesRepository = {
    */
   async obtenerTipoEventoDeLote(loteId) {
     const sql = `
-      SELECT tipo_evento_id
-      FROM asignaciones
-      WHERE lote_id = ?
+      SELECT a.tipo_evento_id
+      FROM asignaciones a
+      WHERE a.lote_id = ?
+        ${filtroVigentes()}
       LIMIT 1
     `;
     const [filas] = await pool.query(sql, [loteId]);
@@ -244,8 +271,9 @@ const AsignacionesRepository = {
   async contarPorLote(loteId) {
     const sql = `
       SELECT COUNT(*) AS total
-      FROM asignaciones
-      WHERE lote_id = ?
+      FROM asignaciones a
+      WHERE a.lote_id = ?
+        ${filtroVigentes()}
     `;
     const [filas] = await pool.query(sql, [loteId]);
     return Number(filas[0].total);
@@ -260,47 +288,78 @@ const AsignacionesRepository = {
   async contarPorLoteYAlumno(loteId, carnet) {
     const sql = `
       SELECT COUNT(*) AS total
-      FROM asignaciones
-      WHERE lote_id = ?
-        AND alumno_carnet = ?
+      FROM asignaciones a
+      WHERE a.lote_id = ?
+        AND a.alumno_carnet = ?
+        ${filtroVigentes()}
     `;
     const [filas] = await pool.query(sql, [loteId, carnet]);
     return Number(filas[0].total);
   },
 
   /**
-   * Elimina las asignaciones de un alumno concreto dentro de un lote.
+   * Anula las asignaciones de un alumno concreto dentro de un lote.
    * En tesis, un alumno tiene tres filas (una por miembro del jurado); las
-   * borra todas para no dejar un jurado incompleto.
+   * marca todas para no dejar un jurado incompleto.
    *
    * @param {string} loteId Identificador del lote.
    * @param {string} carnet Carnet del alumno.
-   * @returns {Promise<number>} Filas eliminadas.
+   * @returns {Promise<number>} Filas afectadas.
    */
   async eliminarPorLoteYAlumno(loteId, carnet) {
-    const sql = `
-      DELETE FROM asignaciones
-      WHERE lote_id = ?
-        AND alumno_carnet = ?
-    `;
-    const [resultado] = await pool.query(sql, [loteId, carnet]);
+    if (estadoEsquema.asignacionesActive) {
+      const [resultado] = await pool.query(
+        `UPDATE asignaciones a
+            SET a.active = 0
+          WHERE a.lote_id = ?
+            AND a.alumno_carnet = ?
+            AND a.active = 1`,
+        [loteId, carnet]
+      );
+      return resultado.affectedRows;
+    }
+
+    // Respaldo para una base a la que todavía no se le pudo añadir `active`.
+    const [resultado] = await pool.query(
+      `DELETE FROM asignaciones
+        WHERE lote_id = ?
+          AND alumno_carnet = ?`,
+      [loteId, carnet]
+    );
     return resultado.affectedRows;
   },
 
   /**
-   * Elimina un lote completo de asignaciones por su identificador.
+   * Anula un lote completo de asignaciones por su identificador.
+   *
+   * @description Es un BORRADO LÓGICO: las filas se marcan con `active = 0` en
+   * lugar de eliminarse. Motivos:
+   *  - Un acta oficial ya emitida debe seguir siendo rastreable aunque se
+   *    retire del listado.
+   *  - Un `DELETE` sobre filas referenciadas por tablas de detalle lo rechaza
+   *    MariaDB por violación de clave foránea; un `UPDATE` nunca.
    * Solo afecta a las filas de ese lote, aunque otro sorteo se haya guardado
    * en el mismo minuto.
    *
    * @param {string} loteId Identificador del lote.
-   * @returns {Promise<number>} Filas eliminadas.
+   * @returns {Promise<number>} Filas afectadas.
    */
   async eliminarLote(loteId) {
-    const sql = `
-      DELETE FROM asignaciones
-      WHERE lote_id = ?
-    `;
-    const [resultado] = await pool.query(sql, [loteId]);
+    if (estadoEsquema.asignacionesActive) {
+      const [resultado] = await pool.query(
+        `UPDATE asignaciones a
+            SET a.active = 0
+          WHERE a.lote_id = ?
+            AND a.active = 1`,
+        [loteId]
+      );
+      return resultado.affectedRows;
+    }
+
+    const [resultado] = await pool.query(
+      "DELETE FROM asignaciones WHERE lote_id = ?",
+      [loteId]
+    );
     return resultado.affectedRows;
   },
 };

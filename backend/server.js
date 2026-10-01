@@ -16,6 +16,7 @@ const env = require("./src/config/env");
 const logger = require("./src/config/logger");
 const crearApp = require("./src/app");
 const { verificarConexion, cerrarPool } = require("./src/config/db");
+const { prepararBaseDeDatos } = require("./src/config/bootstrap");
 
 /** Margen para que las peticiones en curso terminen antes de cerrar. */
 const TIEMPO_ESPERA_APAGADO_MS = 10000;
@@ -48,6 +49,10 @@ async function iniciar() {
     });
     process.exit(1);
   }
+
+  // Migraciones idempotentes, catálogos y semilla del administrador. No aborta
+  // el arranque si algo falla: registra el motivo y continúa (ver bootstrap.js).
+  await prepararBaseDeDatos();
 
   const app = crearApp();
 

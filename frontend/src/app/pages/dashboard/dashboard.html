@@ -36,10 +36,10 @@
           <tr *ngFor="let asig of ultimosSorteos">
             <td><span class="badge">{{ asig.modalidad }}</span></td>
             <td><strong>{{ asig.alumno_nombre }}</strong> <br><small>{{ asig.alumno_carnet }}</small></td>
-            <td style="font-weight: 500; color: #003366; font-size: 0.95rem;">{{ asig.profesores || asig.profesor_nombre }}</td>
+            <td style="font-weight: 500; color: #003366; font-size: 0.95rem;">{{ asig.profesores }}</td>
             <td>{{ asig.fecha_formateada }}</td> 
             <td style="text-align: center;">
-              <button (click)="eliminarSorteo(asig.alumno_carnet, asig.fecha_formateada)" style="border: none; background: none; color: #CC0000; cursor: pointer; font-size: 1.2rem;"><i class="fas fa-trash"></i></button>
+              <button (click)="eliminarSorteo(asig)" [disabled]="eliminandoClave !== null" style="border: none; background: none; color: #CC0000; cursor: pointer; font-size: 1.2rem;"><i class="fas fa-trash"></i></button>
             </td>
           </tr>
         </tbody>

@@ -57,6 +57,22 @@ services:
       # Swagger nunca se expone en producción.
       SWAGGER_ENABLED: "false"
 
+      # Migraciones idempotentes en el arranque (usuarios.active,
+      # asignaciones.lote_id, asignaciones.active) y siembra de catálogos.
+      # Necesario aquí porque no hay acceso a la consola de MariaDB.
+      DB_AUTO_MIGRATE: "${DB_AUTO_MIGRATE:-true}"
+
+      # Alta idempotente de la cuenta administradora en cada arranque.
+      # Defina SEED_ADMIN_PASSWORD_HASH (preferible) o SEED_ADMIN_PASSWORD en
+      # la pestaña "Environment" de Dokploy. Si no define ninguna y la cuenta
+      # no existe, el arranque genera una contraseña y la imprime una vez en
+      # el log del contenedor.
+      SEED_ADMIN_ENABLED: "${SEED_ADMIN_ENABLED:-true}"
+      SEED_ADMIN_USERNAME: "${SEED_ADMIN_USERNAME:-admin}"
+      SEED_ADMIN_EMAIL: "${SEED_ADMIN_EMAIL:-dpinedah3@miumg.edu.gt}"
+      SEED_ADMIN_PASSWORD: "${SEED_ADMIN_PASSWORD:-}"
+      SEED_ADMIN_PASSWORD_HASH: "${SEED_ADMIN_PASSWORD_HASH:-}"
+
       # Ocelot es un proxy inverso: sin esto el rate limit vería la IP del
       # gateway para todos los usuarios.
       TRUST_PROXY: "${TRUST_PROXY:-true}"

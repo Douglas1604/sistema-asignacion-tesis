@@ -7,6 +7,7 @@
  */
 
 const { pool } = require("../config/db");
+const estadoEsquema = require("../config/schema-state");
 
 /** Columnas públicas de usuario. Excluye deliberadamente `password_hash`. */
 const COLUMNAS_PUBLICAS = `
@@ -18,24 +19,45 @@ const COLUMNAS_PUBLICAS = `
   u.creado_en
 `;
 
+/**
+ * Fragmento que restringe a cuentas habilitadas.
+ *
+ * La columna `active` la añade el arranque (`config/bootstrap.js`) cuando la
+ * base aún no la tiene. Si no está disponible, el filtro se omite en lugar de
+ * provocar un error de columna desconocida en cada login.
+ *
+ * @returns {string} Cláusula a concatenar, o cadena vacía.
+ */
+function filtroActivo() {
+  return estadoEsquema.usuariosActive ? "AND u.active = 1" : "";
+}
+
 const UsuariosRepository = {
   /**
-   * Busca un usuario por email incluyendo su hash, solo para el login.
-   * @param {string} email Correo normalizado en minúsculas.
+   * Busca un usuario por correo O por nombre de usuario, incluyendo su hash.
+   * Solo la usa el login.
+   *
+   * @description El mismo campo del formulario sirve para ambas cosas: el
+   * administrador puede entrar como `admin` o como `admin@…`, sin que el
+   * cliente tenga que saber cuál de los dos guarda la base de datos. Ambos
+   * valores viajan como marcadores `?` independientes: no se concatena nada.
+   *
+   * @param {string} identificador Correo en minúsculas o nombre de usuario.
    * @returns {Promise<object|null>} Fila con hash, o null si no existe.
    */
-  async buscarPorEmailConHash(email) {
+  async buscarPorEmailConHash(identificador) {
     // El JOIN con `roles` resuelve en la misma consulta el nombre del rol que
-    // viajará como claim en el JWT. `LIMIT 1` refuerza la unicidad del correo.
+    // viajará como claim en el JWT. `LIMIT 1` refuerza la unicidad.
     const sql = `
       SELECT u.id, u.username, u.email, u.password_hash, u.rol_id, r.nombre AS rol_nombre
       FROM usuarios u
       LEFT JOIN roles r ON r.id = u.rol_id
-      WHERE u.email = ?
+      WHERE (u.email = ? OR u.username = ?)
+        ${filtroActivo()}
       LIMIT 1
     `;
     // mysql2 devuelve la tupla [filas, metadatosDeColumnas]; solo interesan las filas.
-    const [filas] = await pool.query(sql, [email]);
+    const [filas] = await pool.query(sql, [identificador, identificador]);
     return filas[0] || null;
   },
 
@@ -50,6 +72,7 @@ const UsuariosRepository = {
       FROM usuarios u
       LEFT JOIN roles r ON r.id = u.rol_id
       WHERE u.id = ?
+        ${filtroActivo()}
       LIMIT 1
     `;
     const [filas] = await pool.query(sql, [id]);

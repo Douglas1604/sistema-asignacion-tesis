@@ -31,6 +31,26 @@ test("login correcto devuelve token y datos del usuario", async () => {
   assert.equal(payload.password_hash, undefined);
 });
 
+test("el login acepta el nombre de usuario igual que el correo", async () => {
+  // La cuenta administradora del sistema se conoce por las dos formas; el
+  // cliente no tiene por qué saber cuál guarda la base de datos.
+  const porUsuario = await request(app())
+    .post("/api/v1/auth/login")
+    .send({ username: ADMIN.username, password: PASSWORD_ADMIN });
+
+  assert.equal(porUsuario.status, 200);
+  assert.equal(porUsuario.body.data.user.email, ADMIN.email);
+
+  // También si el nombre de usuario llega en el campo `email` del formulario,
+  // que es lo que envía la pantalla de login con un único campo de texto.
+  const enCampoEmail = await request(app())
+    .post("/api/v1/auth/login")
+    .send({ email: ADMIN.username, password: PASSWORD_ADMIN });
+
+  assert.equal(enCampoEmail.status, 200);
+  assert.equal(enCampoEmail.body.data.user.email, ADMIN.email);
+});
+
 test("la respuesta de login nunca expone el hash de la contraseña", async () => {
   const respuesta = await request(app())
     .post("/api/v1/auth/login")

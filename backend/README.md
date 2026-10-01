@@ -34,6 +34,51 @@ diga lo contrario.
 
 ---
 
+## Preparación automática al arrancar
+
+Pensado para el servidor de producción, donde **no hay acceso a la consola de
+MariaDB**: el arranque prepara la base por sí mismo, de forma idempotente
+(`src/config/bootstrap.js`). Ejecutarlo mil veces deja el mismo resultado que
+ejecutarlo una.
+
+1. **Migraciones que falten** (`DB_AUTO_MIGRATE=true`, valor por defecto):
+   `usuarios.active`, `asignaciones.lote_id` (con relleno de los históricos) y
+   `asignaciones.active`, más sus índices. Equivale a aplicar a mano
+   `migrations/001_*.sql` y `migrations/002_*.sql`.
+2. **Catálogos obligatorios**: filas de `roles` y `tipos_evento`.
+3. **Cuenta administradora** (`seedAdminUser`): si no existe ninguna con el
+   correo ni el usuario configurados, la crea con rol administrador y
+   habilitada; si ya existe, repone su hash, le restituye el rol y la deja con
+   `active = 1`.
+
+```env
+SEED_ADMIN_ENABLED=true
+SEED_ADMIN_USERNAME=admin
+SEED_ADMIN_EMAIL=dpinedah3@miumg.edu.gt
+SEED_ADMIN_PASSWORD_HASH=$2b$12$...   # preferible
+# SEED_ADMIN_PASSWORD=...             # alternativa en claro (mín. 8 caracteres)
+```
+
+Genera el hash sin exponer la contraseña en el entorno:
+
+```bash
+node -e "console.log(require('bcryptjs').hashSync('TU_CONTRASENA', 12))"
+```
+
+Si **no** defines ninguna de las dos y la cuenta todavía no existe, el arranque
+genera una contraseña aleatoria y la imprime **una sola vez** en el log
+(evento `seed_admin_password_generada`), que es el único canal disponible sin
+acceso a la base. Cámbiala en cuanto entres.
+
+Ninguna de estas tareas aborta el arranque: si el usuario de base de datos no
+tiene permiso de `ALTER`, se registra el motivo y la API sigue sirviendo con las
+capacidades que sí detectó (ver `src/config/schema-state.js`).
+
+> El login acepta **correo o nombre de usuario** en el mismo campo:
+> `SELECT ... WHERE (email = ? OR username = ?) AND active = 1`.
+
+---
+
 ## Migración de contraseñas (obligatoria una sola vez)
 
 La versión anterior de la API comparaba la contraseña escrita por el usuario
@@ -189,6 +234,9 @@ npm run audit   # auditoría de dependencias de producción
 Ver `.env.example`. Las obligatorias sin valor por defecto son `DB_HOST`,
 `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `JWT_SECRET` y `CORS_ORIGINS`.
 
+Las de la semilla del administrador (`SEED_ADMIN_*`) y `DB_AUTO_MIGRATE` se
+describen en "Preparación automática al arrancar".
+
 Para producción: `NODE_ENV=production` (desactiva Swagger y los stacks en los
 logs), `SWAGGER_ENABLED=false`, `DB_PASSWORD` no vacía, `CORS_ORIGINS` con el
 dominio real y `TRUST_PROXY=true` si hay un proxy inverso delante.
@@ -199,6 +247,10 @@ dominio real y `TRUST_PROXY=true` si hay un proxy inverso delante.
 
 - **Esquema de base de datos:** `database_schema.sql` estaba desalineado con la
   base real. Ver `docs/ESQUEMA-BD.md`.
+- **Borrado de actas:** es **lógico** (`active = 0`), nunca `DELETE`. Un borrado
+  físico sobre filas referenciadas lo rechazaría MariaDB por clave foránea, y un
+  acta ya emitida debe seguir siendo rastreable. La respuesta de la API conserva
+  el campo `eliminados` por compatibilidad.
 - **`backver.js/`:** plantilla antigua, usada solo como referencia estructural.
   Contiene credenciales de base de datos escritas en el código y SQL dinámico
   interpolado; **nada de ese código se ha reutilizado**.

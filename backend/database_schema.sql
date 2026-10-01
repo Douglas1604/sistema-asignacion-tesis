@@ -30,6 +30,10 @@ CREATE TABLE IF NOT EXISTS usuarios (
     password_hash VARCHAR(255) NOT NULL,
     email VARCHAR(100) UNIQUE,
     rol_id INT NOT NULL,
+    -- Cuenta habilitada. El login exige active = 1 además de la contraseña
+    -- correcta, de modo que una cuenta se puede revocar sin borrarla (lo que
+    -- rompería las referencias de la pista de auditoría).
+    active TINYINT(1) NOT NULL DEFAULT 1,
     creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (rol_id) REFERENCES roles(id) ON DELETE RESTRICT
 );
@@ -53,17 +57,25 @@ CREATE TABLE IF NOT EXISTS tipos_evento (
 -- ejemplo: 'Grupo 1 de Administración de Sistemas - Ing. Pérez' para privado,
 -- o 'Ing. Pérez (Presidente)' para un miembro del jurado de tesis.
 --
--- El módulo de reportes agrupa los registros por esas cadenas y por la fecha,
--- así que el formato del texto forma parte del contrato: no cambiarlo sin
--- adaptar también la generación de actas.
+-- El módulo de reportes agrupa los registros por `lote_id` y compone el acta
+-- con esas cadenas, así que el formato del texto forma parte del contrato: no
+-- cambiarlo sin adaptar también la generación de actas.
 -- -------------------------------------------------------------------------
 
 CREATE TABLE IF NOT EXISTS asignaciones (
     id INT AUTO_INCREMENT PRIMARY KEY,
+    -- Identificador del guardado al que pertenece la fila (ver migración 001).
+    -- Es la clave de agrupamiento y de borrado de un acta: la fecha, con
+    -- precisión de minuto, no distingue dos sorteos guardados a la vez.
+    lote_id CHAR(36) CHARACTER SET ascii NOT NULL,
     profesor_nombre VARCHAR(100) NOT NULL,
     alumno_carnet VARCHAR(50) NOT NULL,
     alumno_nombre VARCHAR(100) NOT NULL,
     tipo_evento_id INT NOT NULL,
+    -- Borrado LÓGICO (ver migración 002): anular un lote pone active = 0. Un
+    -- DELETE sobre filas referenciadas lo rechazaría MariaDB por clave
+    -- foránea, y un acta ya emitida debe seguir siendo rastreable.
+    active TINYINT(1) NOT NULL DEFAULT 1,
     fecha_asignacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (tipo_evento_id) REFERENCES tipos_evento(id) ON DELETE RESTRICT
 );
@@ -73,9 +85,16 @@ CREATE TABLE IF NOT EXISTS asignaciones (
 CREATE INDEX idx_asignaciones_fecha ON asignaciones (fecha_asignacion);
 CREATE INDEX idx_asignaciones_carnet ON asignaciones (alumno_carnet);
 CREATE INDEX idx_asignaciones_tipo_evento ON asignaciones (tipo_evento_id);
+CREATE INDEX idx_asignaciones_lote ON asignaciones (lote_id);
+CREATE INDEX idx_asignaciones_active ON asignaciones (active);
 
 -- -------------------------------------------------------------------------
 -- 4. Datos iniciales
+--
+-- El usuario administrador NO se crea aquí: lo siembra el arranque del
+-- servidor de forma idempotente (`src/config/bootstrap.js`, variables
+-- SEED_ADMIN_*), para no dejar ninguna credencial escrita en el repositorio
+-- y para que funcione también en servidores sin acceso a esta consola.
 -- -------------------------------------------------------------------------
 
 INSERT IGNORE INTO roles (nombre, descripcion)

@@ -10,9 +10,19 @@ import { HttpInterceptorFn, HttpErrorResponse } from '@angular/common/http';
 import { inject } from '@angular/core';
 import { Router } from '@angular/router';
 import { catchError, throwError } from 'rxjs';
+import Swal from 'sweetalert2';
 
 import { AuthService } from '../services/auth';
 import { environment } from '../../environments/environment';
+
+/**
+ * Códigos que invalidan la sesión del cliente.
+ *  - 401: el token falta, está mal firmado o ha caducado.
+ *  - 403: el token es válido pero la cuenta ya no tiene el rol que la
+ *    operación exige (por ejemplo, se le retiró el perfil de administrador).
+ * En ambos casos conservar el token solo produce más errores.
+ */
+const ESTADOS_SIN_SESION = [401, 403];
 
 /**
  * Comprueba que la URL apunta realmente a la API configurada.
@@ -69,12 +79,38 @@ export const authInterceptor: HttpInterceptorFn = (req, next) => {
 
   return next(peticion).pipe(
     catchError((error: HttpErrorResponse) => {
-      // 401 significa sesión ausente, inválida o caducada: limpiamos el estado
-      // local y devolvemos al login. Evita quedarse con un token muerto.
-      if (error.status === 401 && paraNuestraApi) {
+      // Sesión ausente, inválida, caducada o sin permisos: se limpia el estado
+      // local y se devuelve al login. Evita quedarse con un token muerto.
+      //
+      // El propio login se excluye: unas credenciales incorrectas responden
+      // 401 y redirigir desde ahí recargaría la pantalla, borrando el mensaje
+      // de error antes de que el usuario pudiera leerlo.
+      const esLogin = req.url.includes('/auth/login');
+
+      if (paraNuestraApi && !esLogin && ESTADOS_SIN_SESION.includes(error.status)) {
         authService.logout();
-        router.navigate(['/login']);
+
+        // Sin esto, un diálogo de SweetAlert2 abierto (o su spinner de
+        // carga) sobrevive a la navegación: el login queda detrás de un
+        // modal que ya no pertenece a ninguna pantalla y la interfaz parece
+        // congelada. `Swal.close()` es seguro aunque no haya nada abierto.
+        Swal.close();
+
+        // `replaceUrl` sustituye la entrada del historial en lugar de añadir
+        // una nueva: así el botón "atrás" no devuelve a la pantalla protegida
+        // que acabamos de abandonar. La navegación es asíncrona y su promesa
+        // se captura para no dejar un rechazo sin manejar si el router la
+        // cancela (por ejemplo, porque ya estamos navegando).
+        router
+          .navigate(['/login'], {
+            replaceUrl: true,
+            queryParams: { expirada: '1' },
+          })
+          .catch(() => undefined);
       }
+
+      // El error se relanza siempre: el componente que hizo la petición debe
+      // poder bajar su bandera de "cargando" y mostrar lo que corresponda.
       return throwError(() => error);
     }),
   );

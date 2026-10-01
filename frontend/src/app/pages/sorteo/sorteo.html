@@ -123,7 +123,7 @@
                 <li *ngFor="let alu of alumnosAsignadosNormal"><i class="fas fa-check-circle" style="color:#10b981;"></i> {{ obtenerNombreAlumnoLista(alu) }}</li>
               </ul>
             </div>
-            <button *ngIf="alumnosAsignadosNormal.length >= cupoActualNormal" class="btn-umg-play" style="background-color: #003366; width: 100%; margin-top: 15px;" (click)="guardarTernaNormal()"><i class="fas fa-save"></i> GUARDAR TERNA</button>
+            <button *ngIf="alumnosAsignadosNormal.length > 0 && alumnosAsignadosNormal.length >= cupoActualNormal" class="btn-umg-play" style="background-color: #003366; width: 100%; margin-top: 15px;" [disabled]="guardandoNormal || girandoNormalAlum" (click)="guardarTernaNormal()"><i class="fas fa-save"></i> {{ guardandoNormal ? 'GUARDANDO...' : 'GUARDAR TERNA' }}</button>
           </div>
           <div class="ruleta-wrapper">
             <div class="aguja"></div>
@@ -194,7 +194,10 @@
               </ul>
             </div>
             
-            <button *ngIf="alumnosTesisAsignados.length >= cupoActualTesis" class="btn-umg-play" style="background-color: #003366; width: 100%; margin-top: 15px;" (click)="guardarTesisOficial()"><i class="fas fa-save"></i> GUARDAR TERNA COMPLETA</button>
+            <!-- Exige al menos un alumno: con `cupoActualTesis` en 0 el botón aparecía
+                 con la terna vacía y el guardado fallaba con 422. `guardandoTesis`
+                 bloquea el doble envío del mismo lote. -->
+            <button *ngIf="alumnosTesisAsignados.length > 0 && alumnosTesisAsignados.length >= cupoActualTesis" class="btn-umg-play" style="background-color: #003366; width: 100%; margin-top: 15px;" [disabled]="guardandoTesis || girandoTesisAlum" (click)="guardarTesisOficial()"><i class="fas fa-save"></i> {{ guardandoTesis ? 'GUARDANDO...' : 'GUARDAR TERNA COMPLETA' }}</button>
           </div>
           <div class="ruleta-wrapper">
             <div class="aguja"></div>

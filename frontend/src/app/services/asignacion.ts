@@ -92,15 +92,32 @@ export class AsignacionService {
       .pipe(map((respuesta) => respuesta.data));
   }
 
-  eliminarLote(fecha: string): Observable<BorradoData> {
-    const url = `${this.apiUrl}/lote?fecha=${encodeURIComponent(fecha)}`;
+  /**
+   * Anula un lote completo de asignaciones.
+   *
+   * @description La ruta real de la API es `DELETE /asignaciones/lote/{lote_id}`
+   * y exige un UUID. Antes se llamaba a `/asignaciones/lote?fecha=…`, que no
+   * corresponde a ninguna ruta registrada: el servidor respondía 404 y el
+   * botón "Eliminar" de los reportes parecía no hacer nada.
+   *
+   * @param loteId Identificador (UUID) del lote devuelto en el historial.
+   */
+  eliminarLote(loteId: string): Observable<BorradoData> {
+    const url = `${this.apiUrl}/lote/${encodeURIComponent(loteId)}`;
     return this.http
       .delete<ApiResponse<BorradoData>>(url)
       .pipe(map((respuesta) => respuesta.data));
   }
 
-  eliminarAsignacionAlumno(carnet: string, fecha: string): Observable<BorradoData> {
-    const url = `${this.apiUrl}/alumno/${encodeURIComponent(carnet)}/${encodeURIComponent(fecha)}`;
+  /**
+   * Anula las filas de un alumno dentro de un lote concreto.
+   * En tesis son tres (una por miembro del jurado) y se retiran todas.
+   *
+   * @param loteId Identificador (UUID) del lote.
+   * @param carnet Carnet del alumno dentro de ese lote.
+   */
+  eliminarAsignacionAlumno(loteId: string, carnet: string): Observable<BorradoData> {
+    const url = `${this.apiUrl}/lote/${encodeURIComponent(loteId)}/alumno/${encodeURIComponent(carnet)}`;
     return this.http
       .delete<ApiResponse<BorradoData>>(url)
       .pipe(map((respuesta) => respuesta.data));

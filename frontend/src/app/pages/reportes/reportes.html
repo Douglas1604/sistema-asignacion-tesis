@@ -22,7 +22,12 @@
 
     <div style="background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); border-top: 4px solid #003366;">
       
-      <div *ngIf="sorteosAgrupados.length === 0" style="text-align: center; padding: 40px; color: #666;">
+      <div *ngIf="cargando" style="text-align: center; padding: 40px; color: #666;">
+        <i class="fas fa-circle-notch fa-spin" style="font-size: 3rem; color: #003366; margin-bottom: 15px;"></i>
+        <h2>Cargando actas...</h2>
+      </div>
+
+      <div *ngIf="!cargando && sorteosAgrupados.length === 0" style="text-align: center; padding: 40px; color: #666;">
         <i class="fas fa-folder-open" style="font-size: 3rem; color: #ccc; margin-bottom: 15px;"></i>
         <h2>No hay actas disponibles</h2>
       </div>
@@ -50,8 +55,12 @@
                 <button class="btn-umg-play" style="background-color: #10b981; padding: 8px 15px; font-size: 0.9rem;" (click)="exportarSorteoBatch(grupo)">
                   <i class="fas fa-file-excel"></i> Descargar
                 </button>
-                <button class="btn-umg-play" style="background-color: #ef4444; padding: 8px 15px; font-size: 0.9rem;" (click)="eliminarSorteoBatch(grupo)">
-                  <i class="fas fa-trash"></i> Eliminar
+                <button class="btn-umg-play" style="background-color: #ef4444; padding: 8px 15px; font-size: 0.9rem;"
+                        [disabled]="eliminandoLoteId !== null"
+                        [style.opacity]="eliminandoLoteId !== null ? '0.5' : '1'"
+                        (click)="eliminarSorteoBatch(grupo)">
+                  <i class="fas" [class.fa-trash]="eliminandoLoteId !== grupo.lote_id" [class.fa-circle-notch]="eliminandoLoteId === grupo.lote_id" [class.fa-spin]="eliminandoLoteId === grupo.lote_id"></i>
+                  {{ eliminandoLoteId === grupo.lote_id ? 'Eliminando...' : 'Eliminar' }}
                 </button>
               </div>
             </td>

@@ -121,6 +121,9 @@ export class SorteoComponent implements OnInit {
    */
   alumnoGanadorTemporalNormal: Alumno | null = null;
 
+  /** Petición de guardado del grupo en curso: bloquea un doble envío. */
+  guardandoNormal: boolean = false;
+
   // =========================================================
   // Metodo 2: TESIS
   // =========================================================
@@ -155,6 +158,32 @@ export class SorteoComponent implements OnInit {
 
   /** Petición de guardado de la terna en curso: bloquea un doble envío. */
   guardandoTesis: boolean = false;
+
+  // =========================================================
+  // REGISTRO IRREVERSIBLE DE PARTICIPANTES YA SORTEADOS
+  // =========================================================
+  /**
+   * Claves de los participantes que YA salieron en la ruleta durante esta
+   * sesión, por modalidad.
+   *
+   * @description Son la memoria autoritativa del sorteo. Los arreglos
+   * `alumnosTesis`, `profesoresTesis` y `alumnosNormal` son la RULETA VISIBLE,
+   * y de ellos se retira al ganador de forma diferida para que su porción no
+   * desaparezca bajo la aguja mientras el público lee el resultado. Esa
+   * retirada diferida es frágil: basta con que una transición (guardar la
+   * terna, fijar el siguiente jurado) no la ejecute para que el ganador
+   * retenido vuelva a la siguiente ronda y, al final, sobren alumnos sin
+   * asignar. Estos conjuntos cierran ese hueco: una vez que alguien entra,
+   * `purgar…` lo elimina de la ruleta en cada transición, y nada puede
+   * devolverlo.
+   *
+   * Solo se vacían al cargar un Excel nuevo, que es el único momento en que
+   * el sorteo empieza de cero.
+   */
+  private alumnosSorteadosTesis = new Set<string>();
+  private profesoresSorteadosTesis = new Set<string>();
+  private alumnosSorteadosNormal = new Set<string>();
+  private profesoresSorteadosNormal = new Set<string>();
 
   /**
    * @param asignacionService Acceso HTTP a asignaciones y catálogo de modalidades.
@@ -251,6 +280,13 @@ export class SorteoComponent implements OnInit {
               'Nombre Alumno': normalizarCelda(partes[1]) || 'Desconocido'
             };
           });
+        }
+
+        // Si el texto solo traía líneas en blanco, `json_to_sheet([])` genera
+        // un libro sin una sola celda, que Excel abre como archivo dañado.
+        if (datosExportar.length === 0) {
+          Swal.fire('Sin datos', 'No se reconoció ninguna línea con contenido.', 'warning');
+          return;
         }
 
         const worksheet = XLSX.utils.json_to_sheet(datosExportar);
@@ -355,15 +391,25 @@ export class SorteoComponent implements OnInit {
         if (this.eventoSeleccionado?.id === 3) {
           // Una nueva lista de catedráticos invalida el reparto previo: se baja
           // la bandera para permitir que `calcularMatematicaTesis` recalcule.
+          // Cargar un archivo nuevo es el ÚNICO momento en que el sorteo
+          // empieza de cero, así que también se olvida quién ya salió.
           this.matematicaTesisCalculada = false;
-          this.profesoresTesis = [...profesMapeados];
+          this.profesoresSorteadosTesis.clear();
+          this.catedraticosTesisAsignados = [];
+          this.profesorGanadorTemporalTesis = null;
+          this.profesoresTesis = profesMapeados.map((p) => ({ ...p }));
           Swal.fire('Éxito', `${this.profesoresTesis.length} catedráticos cargados para Tesis.`, 'success');
           this.calcularMatematicaTesis();
         } else {
           this.contadoresAreas = {}; 
-          this.profesoresBaseNormal = [...profesMapeados];
+          this.profesoresSorteadosNormal.clear();
+          this.catedraticoGanadorNormal = null;
+          this.profesoresBaseNormal = profesMapeados.map((p) => ({ ...p }));
           if (this.eventoSeleccionado?.id === 1) {
-            this.profesoresNormal = [...this.profesoresBaseNormal]; 
+            // Copias propias: el número de grupo se escribe sobre el objeto de
+            // la ruleta al ganar, y con referencias compartidas esa escritura
+            // alteraba también la lista base.
+            this.profesoresNormal = this.profesoresBaseNormal.map((p) => ({ ...p })); 
             this.areaSeleccionada = '';
             Swal.fire('Excel Cargado', `Detectados ${this.profesoresBaseNormal.length} catedráticos. Selecciona un Área.`, 'info');
           } else {
@@ -408,11 +454,20 @@ export class SorteoComponent implements OnInit {
         const alumnosMapeados = resultado.filas;
 
         if (this.eventoSeleccionado?.id === 3) {
-          this.alumnosTesis = [...alumnosMapeados];
+          this.alumnosSorteadosTesis.clear();
+          this.alumnosTesisAsignados = [];
+          this.alumnoGanadorTemporalTesis = null;
+          this.cupoActualTesis = 0;
+          this.matematicaTesisCalculada = false;
+          this.alumnosTesis = alumnosMapeados.map((a) => ({ ...a }));
           Swal.fire('Éxito', `${this.alumnosTesis.length} alumnos cargados para Tesis.`, 'success');
           this.calcularMatematicaTesis();
         } else {
-          this.alumnosNormal = [...alumnosMapeados];
+          this.alumnosSorteadosNormal.clear();
+          this.alumnosAsignadosNormal = [];
+          this.alumnoGanadorTemporalNormal = null;
+          this.cupoActualNormal = 0;
+          this.alumnosNormal = alumnosMapeados.map((a) => ({ ...a }));
           Swal.fire('Éxito', `${this.alumnosNormal.length} alumnos cargados.`, 'success');
           this.calcularMatematicaNormal();
         }
@@ -443,6 +498,82 @@ export class SorteoComponent implements OnInit {
     if (avisos.length > 0) {
       Swal.fire('Aviso', avisos.join('\n'), 'warning');
     }
+  }
+
+  // =========================================================
+  // RETIRADA IRREVERSIBLE DE PARTICIPANTES
+  // =========================================================
+  /**
+   * Clave estable de un alumno dentro de la sesión de sorteo.
+   *
+   * Se prefiere el `id` (correlativo de fila del Excel, único por definición)
+   * y se recurre al carnet normalizado cuando el alumno no procede de un
+   * archivo. Sin el respaldo por carnet, dos filas del mismo alumno con `id`
+   * distinto se considerarían personas diferentes.
+   *
+   * @param alumno Alumno a identificar.
+   * @returns Clave única dentro de la sesión.
+   */
+  private claveAlumno(alumno: Alumno): string {
+    if (alumno.id !== undefined && alumno.id !== null) return `id:${alumno.id}`;
+    return `carnet:${(alumno.carnet || '').trim().toLowerCase()}`;
+  }
+
+  /**
+   * Clave estable de un catedrático dentro de la sesión de sorteo.
+   *
+   * Aquí NO se usa el `id`: en Privado y Seminario se sobrescribe con el
+   * número de grupo al resultar ganador, así que dejaría de identificar a la
+   * persona. El nombre normalizado sí se mantiene constante.
+   *
+   * @param profesor Catedrático a identificar.
+   * @returns Clave única dentro de la sesión.
+   */
+  private claveProfesor(profesor: Profesor): string {
+    return `nombre:${(profesor.nombre_completo || '').trim().toLowerCase()}`;
+  }
+
+  /**
+   * Elimina de la ruleta de Tesis a todo alumno y catedrático ya sorteado.
+   *
+   * @description Se construye un arreglo NUEVO con `filter` en lugar de mutar
+   * el existente: la referencia cambia, Angular recalcula las porciones y la
+   * ruleta pintada coincide siempre con la lista real de participantes. Es
+   * idempotente, así que puede invocarse en cada transición sin efectos
+   * acumulados.
+   */
+  private purgarSorteadosTesis(): void {
+    this.alumnosTesis = this.alumnosTesis.filter(
+      (a) => !this.alumnosSorteadosTesis.has(this.claveAlumno(a))
+    );
+    this.profesoresTesis = this.profesoresTesis.filter(
+      (p) => !this.profesoresSorteadosTesis.has(this.claveProfesor(p))
+    );
+
+    // Ya no hay nada retenido: lo retenido acaba de salir de la ruleta.
+    this.alumnoGanadorTemporalTesis = null;
+    this.profesorGanadorTemporalTesis = null;
+  }
+
+  /**
+   * Equivalente de `purgarSorteadosTesis` para Privado y Seminario.
+   *
+   * En Privado el catedrático se retira también de `profesoresBaseNormal`,
+   * que es la lista que repuebla la ruleta al cambiar de área: sin ello, un
+   * docente ya asignado reaparecería al seleccionar otra área.
+   */
+  private purgarSorteadosNormal(): void {
+    this.alumnosNormal = this.alumnosNormal.filter(
+      (a) => !this.alumnosSorteadosNormal.has(this.claveAlumno(a))
+    );
+    this.profesoresNormal = this.profesoresNormal.filter(
+      (p) => !this.profesoresSorteadosNormal.has(this.claveProfesor(p))
+    );
+    this.profesoresBaseNormal = this.profesoresBaseNormal.filter(
+      (p) => !this.profesoresSorteadosNormal.has(this.claveProfesor(p))
+    );
+
+    this.alumnoGanadorTemporalNormal = null;
   }
 
   /**
@@ -572,7 +703,11 @@ export class SorteoComponent implements OnInit {
     if (this.catedraticoGanadorNormal !== null) return;
     if (!area) return;
     this.areaSeleccionada = area;
-    this.profesoresNormal = [...this.profesoresBaseNormal];
+    // La base ya no contiene a los docentes asignados (`purgarSorteadosNormal`
+    // la depura al guardar), pero se vuelve a filtrar por si acaso: este es el
+    // único punto que repuebla la ruleta desde una lista anterior.
+    this.purgarSorteadosNormal();
+    this.profesoresNormal = this.profesoresBaseNormal.map((p) => ({ ...p }));
     // Fisher-Yates sobre la secuencia 1..n (ver explicación detallada en `leerExcel`),
     // con el índice j obtenido de Web Crypto.
     let numerosDisponibles = Array.from({length: this.profesoresNormal.length}, (_, i) => i + 1);
@@ -620,6 +755,10 @@ export class SorteoComponent implements OnInit {
    * La bandera `girandoNormalProfe` actúa como semáforo contra dobles clics.
    */
   iniciarSorteoCatedraticosNormal() {
+    // Depuración previa: ningún catedrático ni alumno ya asignado puede seguir
+    // en la ruleta al abrir un grupo nuevo.
+    this.purgarSorteadosNormal();
+
     if (this.alumnosNormal.length === 0) { Swal.fire('¡Sorteo Finalizado!', 'Ya no hay alumnos disponibles.', 'info'); return; }
     if (this.eventoSeleccionado?.id === 1 && this.areaSeleccionada === '') { Swal.fire('Atención', 'Selecciona el área.', 'warning'); return; }
     if (this.catedraticoGanadorNormal) { Swal.fire('Atención', 'Ya seleccionado.', 'warning'); return; }
@@ -638,6 +777,8 @@ export class SorteoComponent implements OnInit {
     setTimeout(() => {
       this.girandoNormalProfe = false;
       const profeGanador = this.profesoresNormal[indice];
+      if (!profeGanador) { this.cdr.detectChanges(); return; }
+
       const clave = this.areaSeleccionada || 'General';
       // El número de grupo es secuencial por área (1, 2, 3…), independiente del
       // identificador aleatorio: refleja el orden en que se conformaron los grupos.
@@ -646,8 +787,11 @@ export class SorteoComponent implements OnInit {
 
       this.catedraticoGanadorNormal = profeGanador;
       // Reparto del residuo: mientras quede al menos un sobrante, el grupo
-      // actual absorbe uno de ellos y su cupo es base + 1.
-      this.cupoActualNormal = this.cupoBaseNormal + (this.sobrantesNormal > 0 ? 1 : 0);
+      // actual absorbe uno de ellos y su cupo es base + 1. El cupo se acota a
+      // los alumnos que quedan: pedir más de los disponibles dejaría el grupo
+      // sin poder completarse y el botón de guardar fuera de alcance.
+      const cupoTeoricoNormal = this.cupoBaseNormal + (this.sobrantesNormal > 0 ? 1 : 0);
+      this.cupoActualNormal = Math.max(1, Math.min(cupoTeoricoNormal, this.alumnosNormal.length));
       
       let mensaje = `Se le ha asignado la Terna #${numeroGrupoOrdenado} a ${this.catedraticoGanadorNormal.nombre_completo}.`;
       if (this.eventoSeleccionado?.id === 1 && this.areaSeleccionada !== '') {
@@ -669,13 +813,14 @@ export class SorteoComponent implements OnInit {
    * uno de los sobrantes y se detienen los giros.
    */
   iniciarSorteoAlumnosNormal() {
-    // Paso 1: retirada diferida del ganador del giro anterior.
+    // Paso 1: retirada del ganador del giro anterior y de cualquier alumno ya
+    // sorteado. Mismo blindaje que en Tesis: la ruleta nunca puede contener a
+    // alguien que ya tiene grupo.
     if (this.alumnoGanadorTemporalNormal) {
-      const idx = this.alumnosNormal.findIndex(a => a.id === this.alumnoGanadorTemporalNormal!.id);
-      if (idx !== -1) this.alumnosNormal.splice(idx, 1);
-      this.alumnoGanadorTemporalNormal = null;
+      this.alumnosSorteadosNormal.add(this.claveAlumno(this.alumnoGanadorTemporalNormal));
     }
-    
+    this.purgarSorteadosNormal();
+
     // Paso 2: precondiciones (ruleta en reposo, alumnos disponibles, cupo sin completar).
     if (this.girandoNormalAlum || this.alumnosNormal.length === 0 || this.alumnosAsignadosNormal.length >= this.cupoActualNormal) return;
     this.girandoNormalAlum = true;
@@ -687,7 +832,10 @@ export class SorteoComponent implements OnInit {
     setTimeout(() => {
       this.girandoNormalAlum = false;
       const ganador = this.alumnosNormal[indice];
+      if (!ganador) { this.cdr.detectChanges(); return; }
+
       this.alumnosAsignadosNormal.push(ganador);
+      this.alumnosSorteadosNormal.add(this.claveAlumno(ganador));
       this.alumnoGanadorTemporalNormal = ganador;
       
       Swal.fire({ title: 'Alumno Asignado', text: `${ganador.nombre_completo} fue removido de la ruleta.`, icon: 'success', toast: true, position: 'top-end', showConfirmButton: false, timer: 3000 });
@@ -716,12 +864,19 @@ export class SorteoComponent implements OnInit {
    */
   guardarTernaNormal() {
     if (!this.catedraticoGanadorNormal) return;
-    
-    if (this.alumnoGanadorTemporalNormal) {
-      const idx = this.alumnosNormal.findIndex(a => a.id === this.alumnoGanadorTemporalNormal!.id);
-      if (idx !== -1) this.alumnosNormal.splice(idx, 1);
-      this.alumnoGanadorTemporalNormal = null;
+    if (this.guardandoNormal) return;
+
+    if (this.alumnosAsignadosNormal.length === 0) {
+      Swal.fire('Atención', 'Debes sortear al menos un alumno para este grupo.', 'warning');
+      return;
     }
+
+    // Cierre del grupo: todos sus alumnos quedan marcados y fuera de la
+    // ruleta de forma síncrona, antes de la petición.
+    for (const alumno of this.alumnosAsignadosNormal) {
+      this.alumnosSorteadosNormal.add(this.claveAlumno(alumno));
+    }
+    this.purgarSorteadosNormal();
 
     let nombreFinal = this.catedraticoGanadorNormal.nombre_completo;
     if (this.eventoSeleccionado?.id === 1 && this.areaSeleccionada !== '') { 
@@ -730,8 +885,12 @@ export class SorteoComponent implements OnInit {
       nombreFinal = `Terna #${this.catedraticoGanadorNormal.id} - ${nombreFinal}`;
     }
 
-    this.asignacionService.guardarTerna(nombreFinal, this.alumnosAsignadosNormal, this.eventoSeleccionado.id).subscribe({
+    this.guardandoNormal = true;
+    const alumnosEnviados = [...this.alumnosAsignadosNormal];
+
+    this.asignacionService.guardarTerna(nombreFinal, alumnosEnviados, this.eventoSeleccionado.id).subscribe({
       next: () => {
+        this.guardandoNormal = false;
         Swal.fire('¡Guardado!', 'Asignación registrada correctamente.', 'success');
         const clave = this.areaSeleccionada || 'General';
         this.contadoresAreas[clave] = (this.contadoresAreas[clave] || 0) + 1;
@@ -739,22 +898,29 @@ export class SorteoComponent implements OnInit {
         // Exclusión del docente ya asignado. En Privado también se elimina de la
         // lista base, que es la que repuebla la ruleta al elegir otra área; así
         // un catedrático no puede encabezar dos grupos en áreas distintas.
-        this.profesoresNormal = this.profesoresNormal.filter(p => p.nombre_completo !== this.catedraticoGanadorNormal?.nombre_completo);
-        if (this.eventoSeleccionado?.id === 1) {
-          this.profesoresBaseNormal = this.profesoresBaseNormal.filter(p => p.nombre_completo !== this.catedraticoGanadorNormal?.nombre_completo);
+        // El registro en el conjunto lo hace además irreversible: `seleccionarArea`
+        // repuebla la ruleta desde la base y volvía a incluirlo si el filtro por
+        // nombre fallaba (por ejemplo, por diferencias de mayúsculas o espacios).
+        if (this.catedraticoGanadorNormal) {
+          this.profesoresSorteadosNormal.add(this.claveProfesor(this.catedraticoGanadorNormal));
         }
+        this.purgarSorteadosNormal();
 
-        this.catedraticoGanadorNormal = null; 
-        this.alumnosAsignadosNormal = []; 
+        this.catedraticoGanadorNormal = null;
+        this.alumnosAsignadosNormal = [];
+        this.cupoActualNormal = 0;
         if (this.eventoSeleccionado?.id === 1) { this.areaSeleccionada = ''; }
-        
+
         this.calcularMatematicaNormal();
         if (this.profesoresNormal.length === 0 || this.alumnosNormal.length === 0) Swal.fire('¡Finalizado!', 'Proceso concluido.', 'success');
+        this.cdr.detectChanges();
       },
       // Antes no había manejador de error: un fallo al guardar pasaba
       // inadvertido y el usuario creía que la terna había quedado registrada.
       error: (err) => {
+        this.guardandoNormal = false;
         Swal.fire('No se pudo guardar', mensajeParaUsuario(interpretarError(err)), 'error');
+        this.cdr.detectChanges();
       }
     });
   }
@@ -777,21 +943,30 @@ export class SorteoComponent implements OnInit {
    * La guarda `=== 0` es defensiva: con P > 0, `ceil(P / 3)` nunca vale cero.
    */
   calcularMatematicaTesis(ternasForzadas: number = 3) {
+    // Blindaje del divisor: un `ternasForzadas` de 0 o negativo (o un valor no
+    // numérico llegado por error) produciría Infinity/NaN en el cupo y dejaría
+    // la pantalla mostrando "NaN alumnos por terna".
+    const ternasMinimas = Number.isFinite(ternasForzadas) && ternasForzadas > 0
+      ? Math.floor(ternasForzadas)
+      : 1;
+
     if (this.alumnosTesis.length > 0) {
       if (!this.matematicaTesisCalculada) {
         if (this.profesoresTesis.length > 0) {
           this.cantidadTernasTesis = Math.ceil(this.profesoresTesis.length / 3);
         } else {
-          this.cantidadTernasTesis = ternasForzadas;
+          this.cantidadTernasTesis = ternasMinimas;
         }
 
-        if (this.cantidadTernasTesis === 0) this.cantidadTernasTesis = 1;
+        // Con P > 0, `ceil(P / 3)` nunca vale cero; la guarda cubre el resto
+        // de caminos y garantiza que el divisor sea siempre >= 1.
+        if (!(this.cantidadTernasTesis > 0)) this.cantidadTernasTesis = 1;
         this.cupoBaseTesis = Math.floor(this.alumnosTesis.length / this.cantidadTernasTesis);
         this.sobrantesTesis = this.alumnosTesis.length % this.cantidadTernasTesis;
         this.matematicaTesisCalculada = true;
       }
     } else {
-      this.cantidadTernasTesis = ternasForzadas;
+      this.cantidadTernasTesis = ternasMinimas;
       this.cupoBaseTesis = 0;
       this.sobrantesTesis = 0;
     }
@@ -808,14 +983,15 @@ export class SorteoComponent implements OnInit {
    * base + 1 si quedan sobrantes por repartir.
    */
   iniciarSorteoTesisCatedratico() {
-    // Retirada diferida del catedrático ganador del giro anterior.
+    // Retirada del ganador del giro anterior y, con ella, de cualquier
+    // participante que ya salió en una terna previa. Es la última barrera
+    // antes de decidir: lo que quede en la ruleta está realmente disponible.
     if (this.profesorGanadorTemporalTesis) {
-      const idx = this.profesoresTesis.findIndex(p => p.id === this.profesorGanadorTemporalTesis!.id);
-      if (idx !== -1) this.profesoresTesis.splice(idx, 1);
-      this.profesorGanadorTemporalTesis = null;
+      this.profesoresSorteadosTesis.add(this.claveProfesor(this.profesorGanadorTemporalTesis));
     }
+    this.purgarSorteadosTesis();
 
-    if (this.alumnosTesis.length === 0) { 
+    if (this.alumnosTesis.length === 0) {
       Swal.fire('¡Sorteo Finalizado!', 'Ya no hay alumnos disponibles para conformar más jurados.', 'info'); 
       return; 
     }
@@ -831,7 +1007,14 @@ export class SorteoComponent implements OnInit {
     setTimeout(() => {
       this.girandoTesisProfe = false;
       const ganador = this.profesoresTesis[indice];
+      // Defensa ante un estado inconsistente: si la lista cambió durante los
+      // 4 s de animación, el índice podría apuntar fuera del arreglo.
+      if (!ganador) { this.cdr.detectChanges(); return; }
+
       this.catedraticosTesisAsignados.push(ganador);
+      // Queda marcado como sorteado en el ACTO: a partir de aquí ninguna
+      // purga puede devolverlo a la ruleta, aunque la porción siga visible.
+      this.profesoresSorteadosTesis.add(this.claveProfesor(ganador));
       this.profesorGanadorTemporalTesis = ganador;
       
       // Rol por posición: la longitud del jurado tras el `push` (1, 2 o 3)
@@ -851,7 +1034,10 @@ export class SorteoComponent implements OnInit {
           confirmButtonText: 'Continuar Sorteo'
         });
       } else {
-        this.cupoActualTesis = this.cupoBaseTesis + (this.sobrantesTesis > 0 ? 1 : 0);
+        // Mismo acotado que en el jurado designado: el cupo no puede exceder
+        // los alumnos que quedan en la ruleta.
+        const cupoTeorico = this.cupoBaseTesis + (this.sobrantesTesis > 0 ? 1 : 0);
+        this.cupoActualTesis = Math.max(1, Math.min(cupoTeorico, this.alumnosTesis.length));
         Swal.fire({
           title: `¡${rolAsignado} Seleccionado!`,
           text: `${ganador.nombre_completo}\n\n¡Terna Completada! Se han asignado los 3 catedráticos requeridos.\n\nProcede a sortear individualmente a los ${this.cupoActualTesis} alumnos asignados a este jurado.`,
@@ -872,12 +1058,12 @@ export class SorteoComponent implements OnInit {
    * probabilidad uniforme y se detiene al alcanzar `cupoActualTesis`.
    */
   iniciarSorteoTesisAlumnoIndividual() {
-    // Retirada diferida del alumno ganador del giro anterior.
+    // Retirada del ganador retenido y de todo alumno ya sorteado en esta
+    // sesión: el nuevo índice se elige solo entre alumnos realmente libres.
     if (this.alumnoGanadorTemporalTesis) {
-      const idx = this.alumnosTesis.findIndex(a => a.id === this.alumnoGanadorTemporalTesis!.id);
-      if (idx !== -1) this.alumnosTesis.splice(idx, 1);
-      this.alumnoGanadorTemporalTesis = null;
+      this.alumnosSorteadosTesis.add(this.claveAlumno(this.alumnoGanadorTemporalTesis));
     }
+    this.purgarSorteadosTesis();
 
     if (this.catedraticosTesisAsignados.length < 3) { Swal.fire('Atención', 'Debes conformar el jurado de 3 catedráticos primero.', 'warning'); return; }
     if (this.girandoTesisAlum || this.alumnosTesisAsignados.length >= this.cupoActualTesis || this.alumnosTesis.length === 0) return;
@@ -890,8 +1076,12 @@ export class SorteoComponent implements OnInit {
     setTimeout(() => {
       this.girandoTesisAlum = false;
       const ganador = this.alumnosTesis[indice];
-      
+      if (!ganador) { this.cdr.detectChanges(); return; }
+
       this.alumnosTesisAsignados.push(ganador);
+      // Marcado inmediato: la porción sigue visible hasta el próximo giro,
+      // pero el alumno ya no puede volver a ser elegido bajo ningún camino.
+      this.alumnosSorteadosTesis.add(this.claveAlumno(ganador));
       this.alumnoGanadorTemporalTesis = ganador;
       
       const totalAsignados = this.alumnosTesisAsignados.length;
@@ -939,8 +1129,19 @@ export class SorteoComponent implements OnInit {
    * designados por Coordinación sin necesidad de cargar un Excel de catedráticos.
    */
   abrirModalJuradoManual() {
+    // Fijar el siguiente jurado es una TRANSICIÓN de terna: antes de nada se
+    // depura la ruleta con los ya sorteados. Este método nunca vuelve a leer
+    // ni a clonar la lista original importada del Excel; opera siempre sobre
+    // `alumnosTesis`, que es el remanente vivo del sorteo.
+    this.purgarSorteadosTesis();
+
     if (this.alumnosTesis.length === 0) {
-      Swal.fire('Atención', 'Primero debes cargar el archivo Excel con los Alumnos de tesis.', 'warning');
+      Swal.fire('Atención', 'No quedan alumnos disponibles para conformar otra terna.', 'warning');
+      return;
+    }
+
+    if (this.alumnosTesisAsignados.length > 0) {
+      Swal.fire('Atención', 'Guarda la terna en curso antes de fijar un jurado nuevo.', 'warning');
       return;
     }
 
@@ -991,17 +1192,7 @@ export class SorteoComponent implements OnInit {
       if (result.isConfirmed && result.value) {
         const { presi, vocal1, vocal2 } = result.value;
 
-        this.catedraticosTesisAsignados = [
-          { nombre_completo: presi },
-          { nombre_completo: vocal1 },
-          { nombre_completo: vocal2 }
-        ];
-
-        // Garantiza el cálculo del reparto euclidiano
-        this.calcularMatematicaTesis(3);
-
-        // Fija el cupo exacto de alumnos a sortear para esta terna
-        this.cupoActualTesis = this.cupoBaseTesis + (this.sobrantesTesis > 0 ? 1 : 0);
+        this.fijarJuradoDesignado([presi, vocal1, vocal2]);
 
         Swal.fire({
           title: '¡Jurado Registrado!',
@@ -1009,10 +1200,40 @@ export class SorteoComponent implements OnInit {
           icon: 'success',
           confirmButtonColor: '#003366'
         });
-
-        this.cdr.detectChanges();
       }
     });
+  }
+
+  /**
+   * Fija el jurado de la siguiente terna y calcula su cupo de alumnos.
+   *
+   * @description Es el punto de TRANSICIÓN entre ternas, extraído del diálogo
+   * para que la lógica sea verificable sin DOM. No lee ni clona en ningún
+   * momento el listado original importado del Excel: el cupo se calcula
+   * siempre contra `alumnosTesis`, el remanente vivo del sorteo.
+   *
+   * @param nombres Los tres integrantes, en orden Presidente, Vocal 1, Vocal 2.
+   */
+  fijarJuradoDesignado(nombres: [string, string, string]) {
+    // Depuración previa: nadie que ya haya salido puede integrar la terna
+    // nueva ni seguir en la ruleta de alumnos.
+    this.purgarSorteadosTesis();
+
+    this.catedraticosTesisAsignados = nombres.map((nombre) => ({
+      nombre_completo: nombre,
+    }));
+
+    // Garantiza el cálculo del reparto euclidiano
+    this.calcularMatematicaTesis(3);
+
+    // Fija el cupo exacto de alumnos a sortear para esta terna, acotado a los
+    // alumnos que REALMENTE quedan: pedir más de los disponibles dejaría el
+    // botón de guardar inalcanzable al agotarse la ruleta.
+    const cupoTeorico = this.cupoBaseTesis + (this.sobrantesTesis > 0 ? 1 : 0);
+    this.cupoActualTesis = Math.max(1, Math.min(cupoTeorico, this.alumnosTesis.length));
+
+    this.alumnosTesisAsignados = [];
+    this.cdr.detectChanges();
   }
 
   /**
@@ -1024,32 +1245,84 @@ export class SorteoComponent implements OnInit {
     this.cdr.detectChanges();
   }
 
-guardarTesisOficial() {
-    this.alumnoGanadorTemporalTesis = null;
+  guardarTesisOficial() {
+    // Semáforo contra el doble clic: sin él, dos pulsaciones seguidas
+    // registran la misma terna en dos lotes distintos.
+    if (this.guardandoTesis) return;
+
+    if (this.catedraticosTesisAsignados.length !== 3) {
+      Swal.fire('Atención', 'La terna debe tener exactamente 3 catedráticos antes de guardarse.', 'warning');
+      return;
+    }
+
+    // Con `cupoActualTesis` en 0 (más ternas que alumnos) la plantilla mostraba
+    // el botón de guardar sin ningún alumno sorteado y el backend respondía 422.
+    if (this.alumnosTesisAsignados.length === 0) {
+      Swal.fire('Atención', 'Debes sortear al menos un alumno para esta terna.', 'warning');
+      return;
+    }
+
+    if (!this.eventoSeleccionado) {
+      Swal.fire('Atención', 'Selecciona la modalidad antes de guardar.', 'warning');
+      return;
+    }
+
+    // ===== CIERRE DEFINITIVO DE LA TERNA (antes de cualquier asincronía) =====
+    // Aquí estaba el defecto: el método solo ponía a null
+    // `alumnoGanadorTemporalTesis`, en lugar de retirar de la ruleta al alumno
+    // que esa variable estaba reteniendo. Ese alumno seguía en `alumnosTesis`
+    // y volvía a salir en la terna siguiente ocupando un cupo ajeno; con tres
+    // ternas eso dejaba exactamente dos alumnos sin asignar al final.
+    //
+    // Ahora se registran TODOS los integrantes de la terna en los conjuntos de
+    // sorteados y se purga la ruleta de forma síncrona, antes de enviar nada:
+    // pase lo que pase con la petición, ninguno puede reaparecer.
+    for (const alumno of this.alumnosTesisAsignados) {
+      this.alumnosSorteadosTesis.add(this.claveAlumno(alumno));
+    }
+    for (const profesor of this.catedraticosTesisAsignados) {
+      this.profesoresSorteadosTesis.add(this.claveProfesor(profesor));
+    }
+    this.purgarSorteadosTesis();
+
     this.guardandoTesis = true;
+
+    // Copia del envío: si el usuario reintenta, se manda exactamente lo que se
+    // cerró aquí y no lo que el estado tenga en ese momento.
+    const juradoEnviado = [...this.catedraticosTesisAsignados];
+    const alumnosEnviados = [...this.alumnosTesisAsignados];
 
     this.asignacionService
       .guardarTernaTesis(
-        this.catedraticosTesisAsignados,
-        this.alumnosTesisAsignados,
+        juradoEnviado,
+        alumnosEnviados,
         this.eventoSeleccionado.id
       )
       .subscribe({
         next: () => {
           this.guardandoTesis = false;
           Swal.fire('¡Guardado!', 'El jurado y su grupo de alumnos han sido registrados correctamente.', 'success');
+
+          // Se consume el sobrante que absorbió esta terna.
           if (this.sobrantesTesis > 0) this.sobrantesTesis--;
+
           this.alumnosTesisAsignados = [];
           this.catedraticosTesisAsignados = [];
+          // El cupo pertenece a la terna que acaba de cerrarse: dejarlo vivo
+          // permitiría sortear alumnos para un jurado que todavía no existe.
+          this.cupoActualTesis = 0;
+
           this.calcularMatematicaTesis();
           if (this.alumnosTesis.length === 0) { Swal.fire('¡Finalizado!', 'Todos los tesistas han sido asignados.', 'success'); }
           this.cdr.detectChanges();
         },
         error: (err: any) => {
           this.guardandoTesis = false;
+          // La terna NO se limpia: sigue en pantalla para reintentar el envío
+          // con los mismos integrantes, que ya están fuera de la ruleta.
           Swal.fire(
             'No se pudo confirmar la terna',
-            `No se pudo confirmar la terna, no se guardaron cambios. ${mensajeParaUsuario(interpretarError(err))}`,
+            `No se pudo confirmar la terna, no se guardaron cambios. Puedes reintentar el guardado. ${mensajeParaUsuario(interpretarError(err))}`,
             'error'
           );
           this.cdr.detectChanges();

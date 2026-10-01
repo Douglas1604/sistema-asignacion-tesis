@@ -64,8 +64,15 @@ async function instalarDobles() {
     [PROFESOR.id, PROFESOR],
   ]);
 
-  UsuariosRepository.buscarPorEmailConHash = async (email) =>
-    porEmail.get(email) || null;
+  // El doble replica el criterio real del repositorio: la búsqueda del login
+  // acepta indistintamente el correo o el nombre de usuario.
+  UsuariosRepository.buscarPorEmailConHash = async (identificador) => {
+    if (porEmail.has(identificador)) return porEmail.get(identificador);
+    for (const usuario of porEmail.values()) {
+      if (usuario.username === identificador) return usuario;
+    }
+    return null;
+  };
   UsuariosRepository.buscarPorId = async (id) => porId.get(Number(id)) || null;
   UsuariosRepository.listar = async () => [ADMIN, PROFESOR];
   UsuariosRepository.contar = async () => 2;

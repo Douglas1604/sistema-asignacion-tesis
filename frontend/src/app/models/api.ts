@@ -123,6 +123,8 @@ export interface CrearAsignacionTesisRequest {
 
 /** Resultado del registro de una asignación. */
 export interface CrearAsignacionData {
+  /** Lote generado por el servidor para todas las filas de este guardado. */
+  lote_id: string;
   registros: number;
   tipo_evento_id: number;
   modo: 'tesis' | 'terna';
@@ -130,6 +132,12 @@ export interface CrearAsignacionData {
 
 /** Fila del historial, en el formato que consumen los reportes. */
 export interface AsignacionReporte {
+  /**
+   * Identificador del guardado al que pertenece la fila.
+   * Es la clave real de agrupamiento y de borrado de un acta: la fecha, con
+   * precisión de minuto, no distingue dos sorteos guardados a la vez.
+   */
+  lote_id: string;
   modalidad: string;
   profesor_nombre: string;
   alumno_info: string;

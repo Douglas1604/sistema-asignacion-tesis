@@ -80,12 +80,22 @@ test("login sin campos obligatorios responde 422 con detalle por campo", async (
   assert.ok(campos.includes("body.password"));
 });
 
-test("login con correo mal formado responde 422", async () => {
-  const respuesta = await request(app())
+test("un identificador que no existe responde 401, sea correo o usuario", async () => {
+  // El campo admite correo Y nombre de usuario, así que una cadena sin arroba
+  // es una entrada legítima: no se rechaza por formato, simplemente no
+  // corresponde a ninguna cuenta. Responder 422 solo a los correos mal
+  // formados delataría, además, qué identificadores tienen forma válida.
+  const comoUsuario = await request(app())
     .post("/api/v1/auth/login")
-    .send({ email: "esto-no-es-un-correo", password: "algo" });
+    .send({ username: "esto-no-es-un-correo", password: "algo" });
 
-  assert.equal(respuesta.status, 422);
+  const comoCorreo = await request(app())
+    .post("/api/v1/auth/login")
+    .send({ email: "nadie@umg.edu.gt", password: "algo" });
+
+  assert.equal(comoUsuario.status, 401);
+  assert.equal(comoCorreo.status, 401);
+  assert.equal(comoUsuario.body.error.message, comoCorreo.body.error.message);
 });
 
 test("un campo no declarado en el cuerpo se rechaza", async () => {

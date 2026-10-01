@@ -13,14 +13,18 @@
       </div>
 
       <div class="form-group">
-        <label for="email">Correo Electrónico</label>
+        <label for="email">Usuario o Correo Electrónico</label>
         <div class="input-with-icon">
-          <i class="fas fa-envelope"></i> <input 
-            type="email" 
+          <!-- `type="text"` y no `type="email"`: con el tipo correo, el propio
+               navegador rechazaba el formulario si se escribía el nombre de
+               usuario ("admin"), sin llegar a enviar la petición. -->
+          <i class="fas fa-user"></i> <input 
+            type="text" 
             id="email" 
             name="email"
+            autocomplete="username"
             [(ngModel)]="email" 
-            placeholder="ejemplo@miumg.edu.gt"
+            placeholder="admin o ejemplo@miumg.edu.gt"
             required>
         </div>
       </div>
@@ -33,6 +37,7 @@
             id="password" 
             name="password"
             [(ngModel)]="password" 
+            autocomplete="current-password"
             placeholder="******"
             required>
         </div>

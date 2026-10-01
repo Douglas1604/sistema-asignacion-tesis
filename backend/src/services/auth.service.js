@@ -91,18 +91,23 @@ const AuthService = {
   /**
    * Valida credenciales y devuelve el token de acceso.
    *
-   * Siempre responde con el mismo mensaje genérico tanto si el correo no
+   * Siempre responde con el mismo mensaje genérico tanto si la cuenta no
    * existe como si la contraseña es incorrecta, para no revelar qué cuentas
    * están dadas de alta (enumeración de usuarios).
    *
-   * @param {{email: string, password: string}} credenciales
+   * @param {{identificador?: string, email?: string, password: string}} credenciales
+   * `identificador` es el correo o el nombre de usuario ya normalizado por el
+   * validador; `email` se acepta por compatibilidad con llamadas directas.
    * @param {{ip?: string, requestId?: string}} [contexto] Datos para la pista de auditoría.
    * @returns {Promise<{token: string, expiresIn: string, user: object}>}
    * @throws {AppError} 401 si las credenciales no son válidas.
    */
-  async login({ email, password }, contexto = {}) {
-    // Paso 1 (capa de datos): recuperar la cuenta, incluyendo el hash, por correo.
-    const usuario = await UsuariosRepository.buscarPorEmailConHash(email);
+  async login({ identificador, email, password }, contexto = {}) {
+    const credencial = identificador || email || "";
+
+    // Paso 1 (capa de datos): recuperar la cuenta habilitada, incluyendo el
+    // hash, buscando indistintamente por correo o por nombre de usuario.
+    const usuario = await UsuariosRepository.buscarPorEmailConHash(credencial);
 
     // Paso 2 (verificación en tiempo constante): se ejecuta SIEMPRE exactamente
     // un `bcrypt.compare` con el mismo coste, exista o no la cuenta.
@@ -124,7 +129,7 @@ const AuthService = {
         accion: "LOGIN_FALLIDO",
         usuarioId: usuario ? usuario.id : null,
         recurso: "auth",
-        detalles: { email },
+        detalles: { identificador: credencial },
         ...contexto,
       });
       throw AppError.unauthorized("Correo o contraseña incorrectos");

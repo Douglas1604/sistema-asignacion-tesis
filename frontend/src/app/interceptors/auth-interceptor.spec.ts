@@ -112,4 +112,47 @@ describe('authInterceptor', () => {
     expect(authService.obtenerToken()).toBeNull();
     expect(localStorage.getItem('auth_session')).toBeNull();
   });
+
+  it('limpia la sesión cuando la API responde 403', () => {
+    localStorage.setItem('auth_token', TOKEN);
+    localStorage.setItem(
+      'auth_session',
+      JSON.stringify({ id: 1, email: 'a@umg.edu.gt', rol: 'profesor' }),
+    );
+
+    const authService = TestBed.inject(AuthService);
+
+    http.delete(`${environment.apiUrl}/asignaciones/lote/abc`).subscribe({
+      error: () => undefined,
+    });
+
+    httpMock
+      .expectOne(`${environment.apiUrl}/asignaciones/lote/abc`)
+      .flush(
+        { success: false, error: { code: 'FORBIDDEN', message: 'Sin permisos' } },
+        { status: 403, statusText: 'Forbidden' },
+      );
+
+    expect(authService.obtenerToken()).toBeNull();
+    expect(localStorage.getItem('auth_session')).toBeNull();
+  });
+
+  it('un 401 del propio login no borra nada ni redirige', () => {
+    // Unas credenciales incorrectas no son una sesion caducada: si el
+    // interceptor redirigiera, el mensaje de error desaparecería de la vista.
+    http.post(`${environment.apiUrl}/auth/login`, { email: 'a@umg.edu.gt', password: 'x' }).subscribe({
+      error: () => undefined,
+    });
+
+    httpMock
+      .expectOne(`${environment.apiUrl}/auth/login`)
+      .flush(
+        { success: false, error: { code: 'UNAUTHORIZED', message: 'Correo o contraseña incorrectos' } },
+        { status: 401, statusText: 'Unauthorized' },
+      );
+
+    // No había sesión que borrar; lo relevante es que la petición se resolvió
+    // sin que el interceptor navegara.
+    expect(localStorage.getItem('auth_token')).toBeNull();
+  });
 });

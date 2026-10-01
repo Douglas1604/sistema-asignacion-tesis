@@ -4,7 +4,7 @@
  * y las envía al servicio de autenticación.
  */
 
-import { Component } from '@angular/core';
+import { Component, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router, ActivatedRoute } from '@angular/router';
@@ -30,8 +30,9 @@ const DOMINIOS_INSTITUCIONALES = ['@miumg.edu.gt', '@umg.edu.gt'];
   templateUrl: './login.html',
   styleUrl: './login.css',
 })
-export class LoginComponent {
+export class LoginComponent implements OnInit {
   // Variables vinculadas a los inputs del formulario en el HTML mediante ngModel
+  // `email` admite también el nombre de usuario: el backend resuelve ambos.
   email: string = '';
   password: string = '';
 
@@ -46,6 +47,18 @@ export class LoginComponent {
     private router: Router,
     private route: ActivatedRoute,
   ) {}
+
+  /**
+   * Explica por qué el usuario ha vuelto al login cuando llega redirigido por
+   * el interceptor tras un 401 o un 403. Sin este aviso la pantalla aparecía
+   * limpia y parecía que la aplicación se hubiera reiniciado sola.
+   */
+  ngOnInit(): void {
+    if (this.route.snapshot.queryParamMap.get('expirada') === '1') {
+      this.errorMessage =
+        'Tu sesión se cerró por seguridad (expirada o sin permisos). Vuelve a iniciar sesión.';
+    }
+  }
 
   /**
    * @description Se ejecuta al hacer clic en el botón de "Ingresar".
@@ -64,23 +77,33 @@ export class LoginComponent {
 
     // Validación básica de campos vacíos
     if (!this.email || !this.password) {
-      this.errorMessage = 'Por favor ingresa correo y contraseña';
+      this.errorMessage = 'Por favor ingresa tu usuario o correo y la contraseña';
       return;
     }
+
+    const credencial = this.email.trim();
 
     // =======================================================
     // AYUDA DE INTERFAZ: SOLO CORREOS INSTITUCIONALES UMG
     // Comprobación de conveniencia, no de seguridad (ver arriba).
+    //
+    // Solo se aplica cuando el valor ES un correo: la cuenta administradora
+    // también se identifica por nombre de usuario ("admin"), que no tiene
+    // dominio y quedaba bloqueado aquí sin llegar nunca al servidor.
     // =======================================================
-    const correo = this.email.trim().toLowerCase();
-    const esCorreoInstitucional = DOMINIOS_INSTITUCIONALES.some((dominio) =>
-      correo.endsWith(dominio),
-    );
+    const pareceCorreo = credencial.includes('@');
+    const identificador = pareceCorreo ? credencial.toLowerCase() : credencial;
 
-    if (!esCorreoInstitucional) {
-      this.errorMessage =
-        'Acceso denegado. Solo se permiten correos institucionales (@miumg.edu.gt o @umg.edu.gt).';
-      return; // Detenemos la ejecución aquí, no hacemos petición al backend
+    if (pareceCorreo) {
+      const esCorreoInstitucional = DOMINIOS_INSTITUCIONALES.some((dominio) =>
+        identificador.endsWith(dominio),
+      );
+
+      if (!esCorreoInstitucional) {
+        this.errorMessage =
+          'Acceso denegado. Solo se permiten correos institucionales (@miumg.edu.gt o @umg.edu.gt).';
+        return; // Detenemos la ejecución aquí, no hacemos petición al backend
+      }
     }
 
     this.cargando = true;
@@ -88,7 +111,7 @@ export class LoginComponent {
     // La contraseña viaja en claro sobre el canal y es el servidor quien la
     // verifica contra el hash bcrypt. El cliente nunca la guarda ni la hashea.
     this.authService
-      .login({ email: correo, password: this.password })
+      .login({ email: identificador, password: this.password })
       .subscribe({
         next: () => {
           this.cargando = false;
@@ -112,7 +135,7 @@ export class LoginComponent {
           // contraseña equivocada, para no revelar qué cuentas existen.
           this.errorMessage =
             error.status === 401
-              ? 'Correo o contraseña incorrectos'
+              ? 'Usuario o contraseña incorrectos'
               : error.mensaje;
         },
       });
